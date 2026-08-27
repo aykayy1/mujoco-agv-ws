@@ -1,0 +1,445 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<mujoco model="agv_nav2_test_straight">
+
+  <!--
+    meshdir được tính tương đối từ models/agv_spawn.xml.
+    Thư mục meshes nằm ngang hàng với models.
+  -->
+  <compiler
+    angle="degree"
+    meshdir="../meshes"
+    autolimits="true"/>
+
+  <option
+    timestep="0.002"
+    gravity="0 0 -9.81"
+    integrator="implicitfast"/>
+
+  <visual>
+    <headlight
+      ambient="0.4 0.4 0.4"
+      diffuse="0.8 0.8 0.8"
+      specular="0.1 0.1 0.1"/>
+  </visual>
+
+  <statistic
+    center="0 0 0.2"
+    extent="1.5"/>
+
+  <default>
+
+    <joint
+      damping="0.1"
+      armature="0.001"/>
+
+    <!-- Visual mesh không tham gia collision -->
+    <default class="visual">
+      <geom
+        type="mesh"
+        contype="0"
+        conaffinity="0"
+        density="0"
+        group="2"/>
+    </default>
+
+    <!-- Collision geometry dùng primitive đơn giản -->
+    <default class="collision">
+      <geom
+        group="3"
+        friction="1.0 0.005 0.0001"
+        solref="0.005 1"
+        solimp="0.9 0.95 0.001"/>
+    </default>
+
+  </default>
+
+  <asset>
+
+    <texture
+      name="ground_texture"
+      type="2d"
+      builtin="checker"
+      rgb1="0.25 0.25 0.25"
+      rgb2="0.35 0.35 0.35"
+      width="512"
+      height="512"/>
+
+    <material
+      name="ground_material"
+      texture="ground_texture"
+      texrepeat="5 5"
+      reflectance="0.05"/>
+
+    <mesh
+      name="base_link_mesh"
+      file="Base_Link.stl"/>
+
+    <mesh
+      name="left_wheel_mesh"
+      file="Left_Wheel.stl"/>
+
+    <mesh
+      name="right_wheel_mesh"
+      file="Right_Wheel.stl"/>
+
+    <mesh
+      name="lidar_mesh"
+      file="Lidar.stl"/>
+
+    <mesh
+      name="mam_xoay_mesh"
+      file="Mam_xoay.stl"/>
+
+  </asset>
+
+  <worldbody>
+
+    <light
+      name="main_light"
+      pos="0 0 4"
+      dir="0 0 -1"
+      directional="true"/>
+
+    <geom
+      name="floor"
+      type="plane"
+      group="0"
+      size="80 30 0.1"
+      material="ground_material"
+      friction="1.0 0.005 0.0001"/>
+
+    <!-- Compact Nav2 test arena: Straight corridor. -->
+    <include file="nav2_test_straight_environment.xml"/>
+
+    <!--
+      Base_Link là thân vật lý chính.
+
+      Giá trị z=0.15 chỉ là vị trí thả robot ban đầu.
+      Robot sẽ rơi xuống sàn theo trọng lực.
+    -->
+    <body
+      name="Base_Link"
+      pos="0 0 0.15">
+
+      <!-- Cho phép robot chuyển động tự do trong không gian -->
+      <freejoint name="base_freejoint"/>
+
+      <!--
+        Khối lượng này tạm lấy từ URDF.
+        Chưa dùng để kết luận Sim2Real.
+      -->
+      <inertial
+        pos="-0.000061 -0.014856 0.039725"
+        mass="10.228"
+        diaginertia="0.51173 0.61846 1.0521"/>
+
+      <!-- Mesh chỉ dùng hiển thị -->
+      <geom
+        name="base_visual"
+        class="visual"
+        mesh="base_link_mesh"
+        rgba="0.75 0.75 0.75 1"/>
+
+      <!--
+        Collision dùng box thay vì STL nhiều tam giác.
+
+        center của mesh:
+        x = -0.0175
+        y = -0.014007
+        z = 0.090031
+
+        size trong MuJoCo là half-size.
+      -->
+      <geom
+        name="base_collision"
+        class="collision"
+        type="box"
+        pos="-0.0175 -0.014007 0.090031"
+        size="0.410 0.357 0.16297"
+        mass="0"
+        rgba="0.2 0.5 0.8 0.15"/>
+
+      <!--
+        Base_footprint không có collision và không có mass.
+        Đây chỉ là mốc tọa độ tham chiếu.
+
+        URDF:
+        Base_footprint -> Base_Link
+        xyz = 0.0175 0.014007 0.0925
+
+        Do đó chiều ngược lại:
+        Base_Link -> Base_footprint
+        xyz = -0.0175 -0.014007 -0.0925
+      -->
+      <site
+        name="Base_footprint"
+        type="sphere"
+        pos="-0.0175 -0.014007 -0.0925"
+        size="0.008"
+        rgba="0 1 0 1"/>
+
+            <!--
+        IMU cố định với Base_Link, nằm tại tâm khu vực mâm xoay.
+
+        imu_site là con trực tiếp của Base_Link, không nằm bên trong
+        body Mam_xoay. Vì vậy IMU không quay theo mâm.
+      -->
+      <site
+        name="imu_site"
+        type="sphere"
+        pos="-0.017238 -0.013326 0.27615"
+        size="0.007"
+        rgba="1 0.5 0 1"/>
+
+      <!--
+        Bốn caster thụ động.
+
+        Tọa độ X/Y được lấy từ các cụm caster trong Base_Link.stl.
+        Mesh CAD có đáy caster khoảng z=-0.07294 m, cao hơn đáy bánh
+        chủ động gần 19.56 mm. Vì vậy collision caster được đặt lại để:
+
+          tâm z = -0.0675 m
+          bán kính = 0.025 m
+          đáy = -0.0925 m
+
+        Đáy caster nhờ đó trùng mặt phẳng đáy hai bánh chủ động.
+        Khớp ball cho phép bánh cầu quay thụ động theo mọi hướng.
+      -->
+      <body
+        name="caster_front_left"
+        pos="0.3175 0.152993 -0.0675">
+
+        <joint
+          name="caster_front_left_ball_joint"
+          type="ball"
+          damping="0.001"/>
+
+        <geom
+          name="caster_front_left_collision"
+          class="collision"
+          type="sphere"
+          size="0.025"
+          mass="0.03"
+          friction="0.35 0.002 0.0001"
+          rgba="0.1 0.8 0.2 0.25"/>
+
+      </body>
+
+      <body
+        name="caster_front_right"
+        pos="0.3175 -0.181007 -0.0675">
+
+        <joint
+          name="caster_front_right_ball_joint"
+          type="ball"
+          damping="0.001"/>
+
+        <geom
+          name="caster_front_right_collision"
+          class="collision"
+          type="sphere"
+          size="0.025"
+          mass="0.03"
+          friction="0.35 0.002 0.0001"
+          rgba="0.1 0.8 0.2 0.25"/>
+
+      </body>
+
+      <body
+        name="caster_rear_left"
+        pos="-0.3525 0.152993 -0.0675">
+
+        <joint
+          name="caster_rear_left_ball_joint"
+          type="ball"
+          damping="0.001"/>
+
+        <geom
+          name="caster_rear_left_collision"
+          class="collision"
+          type="sphere"
+          size="0.025"
+          mass="0.03"
+          friction="0.35 0.002 0.0001"
+          rgba="0.1 0.8 0.2 0.25"/>
+
+      </body>
+
+      <body
+        name="caster_rear_right"
+        pos="-0.3525 -0.181007 -0.0675">
+
+        <joint
+          name="caster_rear_right_ball_joint"
+          type="ball"
+          damping="0.001"/>
+
+        <geom
+          name="caster_rear_right_collision"
+          class="collision"
+          type="sphere"
+          size="0.025"
+          mass="0.03"
+          friction="0.35 0.002 0.0001"
+          rgba="0.1 0.8 0.2 0.25"/>
+
+      </body>
+
+      <!-- Bánh trái -->
+      <body
+        name="Left_Wheel"
+        pos="-0.0055001 0.27899 0.0075">
+
+        <joint
+          name="Left_Wheel_jt"
+          type="hinge"
+          axis="0 1 0"
+          limited="false"
+          damping="0.2"/>
+
+        <inertial
+          pos="0 0.019997 0"
+          mass="0.8908"
+          diaginertia="0.0029235 0.0056311 0.0029235"/>
+
+        <geom
+          name="left_wheel_visual"
+          class="visual"
+          mesh="left_wheel_mesh"
+          rgba="0.15 0.15 0.15 1"/>
+
+        <!--
+          Cylinder mặc định có trục theo Z.
+          Quay 90 độ quanh X để trục cylinder nằm theo Y.
+        -->
+        <geom
+          name="left_wheel_collision"
+          class="collision"
+          type="cylinder"
+          size="0.1 0.02"
+          euler="90 0 0"
+          mass="0"
+          friction="1.2 0.01 0.0001"
+          rgba="1 0 0 0.2"/>
+
+      </body>
+
+      <!-- Bánh phải -->
+      <body
+        name="Right_Wheel"
+        pos="-0.0055011 -0.30701 0.0075">
+
+        <joint
+          name="Right_Wheel_jt"
+          type="hinge"
+          axis="0 1 0"
+          limited="false"
+          damping="0.2"/>
+
+        <inertial
+          pos="0 -0.019997 0"
+          mass="0.8908"
+          diaginertia="0.0029235 0.0056311 0.0029235"/>
+
+        <geom
+          name="right_wheel_visual"
+          class="visual"
+          mesh="right_wheel_mesh"
+          rgba="0.15 0.15 0.15 1"/>
+
+        <geom
+          name="right_wheel_collision"
+          class="collision"
+          type="cylinder"
+          size="0.1 0.02"
+          euler="90 0 0"
+          mass="0"
+          friction="1.2 0.01 0.0001"
+          rgba="1 0 0 0.2"/>
+
+      </body>
+
+      <!-- LiDAR 2D: bridge ray-cast từ site lidar_origin. -->
+      <body
+        name="Lidar"
+        pos="0.3305 -0.015607 0.094">
+
+        <geom
+          name="lidar_visual"
+          class="visual"
+          mesh="lidar_mesh"
+          rgba="0.3 0.3 0.3 1"/>
+
+        <!-- +X là góc 0 rad, +Y là chiều tăng góc theo REP-103. -->
+        <site
+          name="lidar_origin"
+          type="sphere"
+          pos="0 0 0.02"
+          size="0.006"
+          rgba="1 0 0 1"/>
+
+      </body>
+
+      <!-- Mâm xoay đang fixed giống URDF -->
+      <body
+        name="Mam_xoay"
+        pos="-0.017238 -0.013326 0.27615">
+
+        <geom
+          name="mam_xoay_visual"
+          class="visual"
+          mesh="mam_xoay_mesh"
+          rgba="0.79 0.82 0.93 1"/>
+
+      </body>
+
+    </body>
+
+  </worldbody>
+
+
+
+
+  <sensor>
+
+      <!-- Vận tốc góc trong frame local của imu_site, rad/s -->
+    <gyro
+      name="imu_gyro"
+      site="imu_site"/>
+
+      <!-- Gia tốc tuyến tính tại vị trí imu_site, m/s^2 -->
+    <accelerometer
+      name="imu_accelerometer"
+      site="imu_site"/>
+
+      <!-- Quaternion orientation của imu_site trong world MuJoCo -->
+    <framequat
+      name="imu_orientation"
+      objtype="site"
+      objname="imu_site"/>
+
+  </sensor>
+  <!--
+    Hai actuator này chưa nhận /cmd_vel.
+    Khi spawn, ctrl mặc định bằng 0 nên bánh chưa quay.
+  -->
+  <actuator>
+
+    <velocity
+      name="left_wheel_motor"
+      joint="Left_Wheel_jt"
+      kv="20"
+      ctrlrange="-8 8"
+      forcerange="-3 3"/>
+
+    <velocity
+      name="right_wheel_motor"
+      joint="Right_Wheel_jt"
+      kv="20"
+      ctrlrange="-8 8"
+      forcerange="-3 3"/>
+
+  </actuator>
+
+</mujoco>

@@ -1,0 +1,78 @@
+# ROS 2 / colcon generated
+build/
+install/
+log/
+
+# Runtime data
+bags/
+rl_runs/
+backups/
+
+# ROS bag files
+*.bag
+*.db3
+*.mcap
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Linux / macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Generated graph outputs
+frames_*.gv
+frames_*.pdf
+
+
+# Training runtime outputs
+phase2_finetune_runs/
+test_results/
+
+# Replay buffers and TensorBoard logs
+*.pkl
+events.out.tfevents.*
+
+
+# Python virtual environments
+.venv/
+.venv_phase2/
+venv/
+
+# ROS 2 generated directories
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.pyc

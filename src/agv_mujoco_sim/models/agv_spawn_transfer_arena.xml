@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<mujoco model="agv_nav2_test_unexpected_obstacle">
+
+  <!--
+    Robot geometry is based on the supplied CAD URDF/STL set.
+
+    Physical wheel track in this model: 0.594 m (Y = +/-0.297 m).
+    The bridge uses the calibrated effective separation 0.636 m for
+    cmd_vel conversion and wheel odometry.
+  -->
+  <compiler
+    angle="degree"
+    meshdir="../meshes"
+    autolimits="true"/>
+
+  <option
+    timestep="0.002"
+    gravity="0 0 -9.81"
+    integrator="implicitfast"/>
+
+  <visual>
+    <headlight
+      ambient="0.4 0.4 0.4"
+      diffuse="0.8 0.8 0.8"
+      specular="0.1 0.1 0.1"/>
+  </visual>
+
+  <statistic center="0 0 0.2" extent="1.5"/>
+
+  <default>
+    <joint damping="0.1" armature="0.001"/>
+
+    <!-- Visual STL meshes never participate in contact or LiDAR ray casting. -->
+    <default class="visual">
+      <geom
+        type="mesh"
+        contype="0"
+        conaffinity="0"
+        density="0"
+        group="2"/>
+    </default>
+
+    <!-- Robot collision primitives remain in group 3. -->
+    <default class="collision">
+      <geom
+        group="3"
+        density="0"
+        friction="1.0 0.005 0.0001"
+        solref="0.005 1"
+        solimp="0.9 0.95 0.001"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture
+      name="ground_texture"
+      type="2d"
+      builtin="checker"
+      rgb1="0.25 0.25 0.25"
+      rgb2="0.35 0.35 0.35"
+      width="512"
+      height="512"/>
+
+    <material
+      name="ground_material"
+      texture="ground_texture"
+      texrepeat="5 5"
+      reflectance="0.05"/>
+
+    <mesh name="base_link_mesh" file="base_link.STL"/>
+    <mesh name="left_wheel_mesh" file="left_wheel.STL"/>
+    <mesh name="right_wheel_mesh" file="right_wheel.STL"/>
+    <mesh name="front_left_caster_mesh" file="front_left_caster.STL"/>
+    <mesh name="front_right_caster_mesh" file="front_right_caster.STL"/>
+    <mesh name="rear_left_caster_mesh" file="rear_left_caster.STL"/>
+    <mesh name="rear_right_caster_mesh" file="rear_right_caster.STL"/>
+    <mesh name="imu_mesh" file="imu.STL"/>
+    <mesh name="lidar_mesh" file="lidar.STL"/>
+  </asset>
+
+  <worldbody>
+    <light
+      name="main_light"
+      pos="0 0 4"
+      dir="0 0 -1"
+      directional="true"/>
+
+    <geom
+      name="floor"
+      type="plane"
+      group="0"
+      size="80 30 0.1"
+      material="ground_material"
+      friction="1.0 0.005 0.0001"/>
+
+    <!-- One large transfer-test arena; the base workspace model is untouched. -->
+    <include file="transfer_combined_environment.xml"/>
+
+    <!-- base_link starts 5 cm above its nominal settled height of 0.1 m. -->
+    <body name="base_link" pos="0 0 0.15">
+      <freejoint name="base_freejoint"/>
+
+      <!--
+        The active links sum to exactly 80 kg:
+        chassis (including camera mass) + 2 wheels + 4 casters + IMU + LiDAR.
+      -->
+      <inertial
+        pos="-0.01641684226393 -2.127036027730e-08 0.01536357867772"
+        mass="77.76660059782901"
+        fullinertia="3.2338238997685766 4.5790630022931795 7.535284316709289 6.94917763249993e-07 -0.010447117841865663 -5.34948547228727e-08"/>
+
+      <geom
+        name="base_visual"
+        class="visual"
+        mesh="base_link_mesh"
+        rgba="0.75 0.75 0.75 1"/>
+
+      <!-- Three boxes retain wheel clearance while covering the CAD envelope. -->
+      <geom
+        name="base_collision_rear"
+        class="collision"
+        type="box"
+        pos="-0.322 0 0.015"
+        size="0.100 0.357 0.0725"
+        rgba="0.2 0.5 0.8 0.15"/>
+      <geom
+        name="base_collision_center"
+        class="collision"
+        type="box"
+        pos="-0.012 0 0.015"
+        size="0.210 0.250 0.0725"
+        rgba="0.2 0.5 0.8 0.15"/>
+      <geom
+        name="base_collision_front"
+        class="collision"
+        type="box"
+        pos="0.298 0 0.015"
+        size="0.100 0.357 0.0725"
+        rgba="0.2 0.5 0.8 0.15"/>
+
+      <!-- Navigation reference at ground level when base_link is at z=0.1 m. -->
+      <site
+        name="base_foot_link"
+        type="sphere"
+        pos="0 0 -0.1"
+        size="0.005"
+        rgba="0 1 0 0"/>
+
+      <!-- Positive wheel angle corresponds to forward robot motion (+X). -->
+      <body name="left_wheel" pos="0 0.297 0" euler="-90 0 0">
+        <joint
+          name="left_wheel_jt"
+          type="hinge"
+          axis="0 0 1"
+          limited="false"
+          damping="0.2"/>
+        <inertial
+          pos="-2.2767068983e-06 -4.0883539315e-07 -0.0141278415"
+          mass="0.936684355982048"
+          fullinertia="0.0029343491062 0.0029343328072 0.0056452287041 3.0243843436e-09 1.7611681221e-08 3.1625847890e-09"/>
+        <geom
+          name="left_wheel_visual"
+          class="visual"
+          mesh="left_wheel_mesh"
+          rgba="0.15 0.15 0.15 1"/>
+        <geom
+          name="left_wheel_collision"
+          class="collision"
+          type="cylinder"
+          size="0.1 0.028"
+          friction="1.2 0.01 0.0001"
+          rgba="1 0 0 0.2"/>
+      </body>
+
+      <body name="right_wheel" pos="0 -0.297 0" euler="-90 0 0">
+        <joint
+          name="right_wheel_jt"
+          type="hinge"
+          axis="0 0 1"
+          limited="false"
+          damping="0.2"/>
+        <inertial
+          pos="2.0712286184e-06 -1.0298315041e-06 0.0141278415"
+          mass="0.936684355982047"
+          fullinertia="0.0029343462033 0.0029343357101 0.0056452287041 -6.9306759880e-09 1.6022183872e-08 -7.9663594389e-09"/>
+        <geom
+          name="right_wheel_visual"
+          class="visual"
+          mesh="right_wheel_mesh"
+          rgba="0.15 0.15 0.15 1"/>
+        <geom
+          name="right_wheel_collision"
+          class="collision"
+          type="cylinder"
+          size="0.1 0.028"
+          friction="1.2 0.01 0.0001"
+          rgba="1 0 0 0.2"/>
+      </body>
+
+      <!-- Free ball joints let the four ball casters roll in any direction. -->
+      <body name="front_left_caster" pos="0.323 0.167 -0.078807">
+        <joint name="front_left_caster_jt" type="ball" damping="0.001"/>
+        <inertial
+          pos="0 0 -2.7371825402e-05"
+          mass="0.0399091557703669"
+          fullinertia="7.2111462855e-06 7.2111444698e-06 7.2594199749e-06 8.8035157662e-13 -8.7566291737e-14 2.1607959245e-13"/>
+        <geom name="caster_front_left_visual" class="visual" mesh="front_left_caster_mesh" rgba="0.2 0.2 0.2 1"/>
+        <geom name="caster_front_left_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25"/>
+      </body>
+
+      <body name="front_right_caster" pos="0.323 -0.167 -0.078807">
+        <joint name="front_right_caster_jt" type="ball" damping="0.001"/>
+        <inertial
+          pos="0 0 -2.7371825402e-05"
+          mass="0.0399091557703669"
+          fullinertia="7.2111462855e-06 7.2111444698e-06 7.2594199749e-06 8.8035157716e-13 -8.7566300715e-14 2.1607958912e-13"/>
+        <geom name="caster_front_right_visual" class="visual" mesh="front_right_caster_mesh" rgba="0.2 0.2 0.2 1"/>
+        <geom name="caster_front_right_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25"/>
+      </body>
+
+      <body name="rear_left_caster" pos="-0.347 0.167 -0.078807">
+        <joint name="rear_left_caster_jt" type="ball" damping="0.001"/>
+        <inertial
+          pos="0 0 -2.7371825402e-05"
+          mass="0.0399091557703668"
+          fullinertia="7.2111462855e-06 7.2111444698e-06 7.2594199749e-06 8.8035157366e-13 -8.7566301701e-14 2.1607958824e-13"/>
+        <geom name="caster_rear_left_visual" class="visual" mesh="rear_left_caster_mesh" rgba="0.2 0.2 0.2 1"/>
+        <geom name="caster_rear_left_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25"/>
+      </body>
+
+      <body name="rear_right_caster" pos="-0.347 -0.167 -0.078807">
+        <joint name="rear_right_caster_jt" type="ball" damping="0.001"/>
+        <inertial
+          pos="0 0 -2.7371825402e-05"
+          mass="0.0399091557703668"
+          fullinertia="7.2111459706e-06 7.2111447847e-06 7.2594199749e-06 -1.1169235652e-12 -1.2014432927e-13 -1.9980887354e-13"/>
+        <geom name="caster_rear_right_visual" class="visual" mesh="rear_right_caster_mesh" rgba="0.2 0.2 0.2 1"/>
+        <geom name="caster_rear_right_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25"/>
+      </body>
+
+      <!-- IMU is fixed to base_link, never to a rotating platform. -->
+      <body name="imu" pos="0 0 0.1091">
+        <inertial
+          pos="0.0023989165 0 -0.0108251693"
+          mass="0.0350113154456988"
+          fullinertia="4.9486481208e-06 8.8682844667e-06 1.1262903048e-05 2.0030538049e-12 -1.7595997497e-08 6.5460652693e-23"/>
+        <geom name="imu_visual" class="visual" mesh="imu_mesh" rgba="0.25 0.25 0.25 1"/>
+        <site name="imu_site" type="sphere" pos="0 0 0" size="0.005" rgba="1 0.5 0 0"/>
+      </body>
+
+      <!-- LiDAR link origin is also the 2D ray-casting origin. -->
+      <body name="lidar" pos="0.33152 0 0.11235">
+        <inertial
+          pos="0.0038697684 -1.4554375616e-05 -0.0055496380"
+          mass="0.165382751635991"
+          fullinertia="7.8865183611e-05 7.5190291494e-05 1.0994675306e-04 4.8471764092e-08 2.1847944396e-06 2.8860157251e-08"/>
+        <geom name="lidar_visual" class="visual" mesh="lidar_mesh" rgba="0.3 0.3 0.3 1"/>
+        <site name="lidar_origin" type="sphere" pos="0 0 0" size="0.005" rgba="1 0 0 0"/>
+      </body>
+
+    </body>
+  </worldbody>
+
+  <sensor>
+    <gyro name="imu_gyro" site="imu_site"/>
+    <accelerometer name="imu_accelerometer" site="imu_site"/>
+    <framequat name="imu_orientation" objtype="site" objname="imu_site"/>
+  </sensor>
+
+  <actuator>
+    <!-- 800 motor RPM through 10:1 gearbox = 8.3775804096 rad/s at wheel. -->
+    <velocity
+      name="left_wheel_motor"
+      joint="left_wheel_jt"
+      kv="100"
+      ctrlrange="-8.3775804096 8.3775804096"
+      forcerange="-19.1 19.1"/>
+    <velocity
+      name="right_wheel_motor"
+      joint="right_wheel_jt"
+      kv="100"
+      ctrlrange="-8.3775804096 8.3775804096"
+      forcerange="-19.1 19.1"/>
+  </actuator>
+
+</mujoco>

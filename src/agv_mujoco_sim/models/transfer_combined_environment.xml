@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static walls are present in the PGM; red boxes are LiDAR-only surprises. -->
+<mujocoinclude>
+  <geom name="arena_left_wall" group="0" pos="-1.5 0 0.5" size="0.15 7.5 0.5" type="box" rgba="0.70 0.70 0.70 1" friction="1.0 0.005 0.0001"/>
+  <geom name="arena_right_wall" group="0" pos="11.5 0 0.5" size="0.15 7.5 0.5" type="box" rgba="0.70 0.70 0.70 1" friction="1.0 0.005 0.0001"/>
+  <geom name="arena_top_wall" group="0" pos="5 7.5 0.5" size="6.5 0.15 0.5" type="box" rgba="0.70 0.70 0.70 1" friction="1.0 0.005 0.0001"/>
+  <geom name="arena_bottom_wall" group="0" pos="5 -7.5 0.5" size="6.5 0.15 0.5" type="box" rgba="0.70 0.70 0.70 1" friction="1.0 0.005 0.0001"/>
+
+  <geom name="upper_static_wall" group="0" pos="5 3.9 0.5" size="0.20 2.0 0.5" type="box" rgba="0.62 0.62 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="lower_static_wall" group="0" pos="5 -3.9 0.5" size="0.20 2.0 0.5" type="box" rgba="0.62 0.62 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="upper_static_box" group="0" pos="7.6 3.1 0.5" size="0.55 0.55 0.5" type="box" rgba="0.62 0.62 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="lower_static_box" group="0" pos="7.6 -3.1 0.5" size="0.55 0.55 0.5" type="box" rgba="0.62 0.62 0.72 1" friction="1.0 0.005 0.0001"/>
+
+  <geom name="unexpected_red_box_1" group="0" pos="4 0 0.5" size="0.35 0.65 0.5" type="box" rgba="0.85 0.05 0.05 1" friction="1.0 0.005 0.0001"/>
+  <geom name="unexpected_red_box_2" group="0" pos="7 0 0.5" size="0.35 0.65 0.5" type="box" rgba="0.85 0.05 0.05 1" friction="1.0 0.005 0.0001"/>
+</mujocoinclude>

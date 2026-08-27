@@ -1,0 +1,23 @@
+scan_to_scan_filter_chain:
+  ros__parameters:
+    filter1:
+      name: angle
+      type: laser_filters/LaserScanAngularBoundsFilter
+      params:
+        lower_angle: -1.5707963
+        upper_angle: 1.5707963
+
+    # Bộ lọc box hiện chưa bật. Chỉ bật khi /scan_raw của robot thật nhìn thấy
+    # chính thân xe và box_frame đã được kiểm tra đúng bằng TF.
+    # filter2:
+    #   name: box
+    #   type: laser_filters/LaserScanBoxFilter
+    #   params:
+    #     box_frame: base_foot_link
+    #     min_x: -0.20
+    #     max_x: 0.20
+    #     min_y: -0.22
+    #     max_y: 0.22
+    #     min_z: -0.10
+    #     max_z: 0.30
+    #     invert: true

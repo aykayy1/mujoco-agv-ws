@@ -1,0 +1,44 @@
+mujoco_ros_bridge:
+  ros__parameters:
+    # Issue 03 randomizes only the ROS/behavior interface used by the SAC
+    # supervisor, not detailed tire, motor, or caster physics.
+    domain_randomization.enabled: false
+    domain_randomization.seed: 42
+
+    # Conservative initial priors. A group has no effect until both its own
+    # switch and the master switch are explicitly enabled for training.
+    domain_randomization.lidar_noise_std_m.enabled: false
+    domain_randomization.lidar_noise_std_m.low: 0.0
+    domain_randomization.lidar_noise_std_m.high: 0.03
+    domain_randomization.lidar_noise_std_m.status: provisional
+    domain_randomization.lidar_noise_std_m.source: conservative_training_prior
+
+    domain_randomization.lidar_dropout_probability.enabled: false
+    domain_randomization.lidar_dropout_probability.low: 0.0
+    domain_randomization.lidar_dropout_probability.high: 0.03
+    domain_randomization.lidar_dropout_probability.status: provisional
+    domain_randomization.lidar_dropout_probability.source: conservative_training_prior
+
+    domain_randomization.odom_linear_scale.enabled: false
+    domain_randomization.odom_linear_scale.low: 0.98
+    domain_randomization.odom_linear_scale.high: 1.02
+    domain_randomization.odom_linear_scale.status: provisional
+    domain_randomization.odom_linear_scale.source: conservative_training_prior
+
+    domain_randomization.odom_angular_scale.enabled: false
+    domain_randomization.odom_angular_scale.low: 0.98
+    domain_randomization.odom_angular_scale.high: 1.02
+    domain_randomization.odom_angular_scale.status: provisional
+    domain_randomization.odom_angular_scale.source: conservative_training_prior
+
+    domain_randomization.command_latency_s.enabled: false
+    domain_randomization.command_latency_s.low: 0.02
+    domain_randomization.command_latency_s.high: 0.15
+    domain_randomization.command_latency_s.status: provisional
+    domain_randomization.command_latency_s.source: conservative_training_prior
+
+    domain_randomization.velocity_response_scale.enabled: false
+    domain_randomization.velocity_response_scale.low: 0.80
+    domain_randomization.velocity_response_scale.high: 1.00
+    domain_randomization.velocity_response_scale.status: provisional
+    domain_randomization.velocity_response_scale.source: conservative_training_prior

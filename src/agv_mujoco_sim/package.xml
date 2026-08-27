@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>agv_mujoco_sim</name>
+  <version>0.1.0</version>
+
+  <description>
+    MuJoCo, Nav2 MPPI and reinforcement-learning simulation package for the
+    agv0509test6 mobile robot.
+  </description>
+
+  <maintainer email="anhkhoa@example.com">anhkhoa</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <!-- ROS 2 Python/runtime interfaces used directly by this package. -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>action_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <!-- Nav2 interfaces and runtime servers launched directly. -->
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>nav2_common</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_smoother</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
+  <exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_waypoint_follower</exec_depend>
+  <exec_depend>nav2_velocity_smoother</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+
+  <!-- Localization and robot state stack. -->
+  <exec_depend>robot_localization</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>laser_filters</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+
+  <!-- Python modules available from Ubuntu/ROS apt. RL libraries are pinned
+       separately in requirements.txt because ROS package.xml cannot express
+       their pip versions. -->
+  <exec_depend>python3-numpy</exec_depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

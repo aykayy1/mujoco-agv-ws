@@ -1,0 +1,250 @@
+<?xml version="1.0"?>
+<robot name="amr">
+
+  <!--
+    Geometry is taken from the supplied CAD URDF/STL files.
+
+    Coordinate convention:
+      +X forward, +Y left, +Z up.
+
+    Physical wheel-joint track:       0.594 m (joint Y = +/-0.297 m)
+    Effective kinematic separation:   0.636 m
+
+    The effective value belongs in the differential-drive controller and
+    wheel-odometry equations; it must not be used to move the wheel joints.
+  -->
+
+  <material name="chassis_gray">
+    <color rgba="0.502 0.502 0.502 1.0"/>
+  </material>
+  <material name="component_gray">
+    <color rgba="0.792 0.820 0.933 1.0"/>
+  </material>
+  <material name="lidar_gray">
+    <color rgba="0.753 0.753 0.753 0.8"/>
+  </material>
+
+  <!-- Root navigation frame at ground level. Keep it massless for KDL. -->
+  <link name="base_foot_link"/>
+
+  <link name="base_link">
+    <inertial>
+      <!-- Camera mass/inertia is merged into the base so the LiDAR-only model remains exactly 80 kg. -->
+      <origin xyz="-0.01641684226393 -2.127036027730e-08 0.01536357867772" rpy="0 0 0"/>
+      <mass value="77.76660059782901"/>
+      <inertia
+        ixx="3.2338238997685766"
+        ixy="6.94917763249993e-07"
+        ixz="-0.010447117841865663"
+        iyy="4.5790630022931795"
+        iyz="-5.34948547228727e-08"
+        izz="7.535284316709289"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://agv_mujoco_sim/meshes/base_link.STL"/>
+      </geometry>
+      <material name="chassis_gray"/>
+    </visual>
+
+    <!--
+      Three primitive boxes approximate the chassis while leaving clearance
+      around the two driven wheels. They replace the high-poly collision mesh.
+    -->
+    <collision name="rear_chassis_collision">
+      <origin xyz="-0.322 0 0.015" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.200 0.714 0.145"/>
+      </geometry>
+    </collision>
+    <collision name="center_chassis_collision">
+      <origin xyz="-0.012 0 0.015" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.420 0.500 0.145"/>
+      </geometry>
+    </collision>
+    <collision name="front_chassis_collision">
+      <origin xyz="0.298 0 0.015" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.200 0.714 0.145"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="base_link_jt" type="fixed">
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <parent link="base_foot_link"/>
+    <child link="base_link"/>
+  </joint>
+
+  <link name="left_wheel">
+    <inertial>
+      <origin xyz="-2.2767068983e-06 -4.0883539315e-07 -0.0141278415" rpy="0 0 0"/>
+      <mass value="0.936684355982048"/>
+      <inertia
+        ixx="0.0029343491062"
+        ixy="3.0243843436e-09"
+        ixz="1.7611681221e-08"
+        iyy="0.0029343328072"
+        iyz="3.1625847890e-09"
+        izz="0.0056452287041"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="package://agv_mujoco_sim/meshes/left_wheel.STL"/>
+      </geometry>
+      <material name="component_gray"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.1" length="0.056"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_wheel_jt" type="continuous">
+    <origin xyz="0 0.297 0" rpy="-1.57079632679 0 0"/>
+    <parent link="base_link"/>
+    <child link="left_wheel"/>
+    <!-- Positive joint velocity produces forward motion (+X). -->
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.02" friction="0.0"/>
+  </joint>
+
+  <link name="right_wheel">
+    <inertial>
+      <origin xyz="2.0712286184e-06 -1.0298315041e-06 0.0141278415" rpy="0 0 0"/>
+      <mass value="0.936684355982047"/>
+      <inertia
+        ixx="0.0029343462033"
+        ixy="-6.9306759880e-09"
+        ixz="1.6022183872e-08"
+        iyy="0.0029343357101"
+        iyz="-7.9663594389e-09"
+        izz="0.0056452287041"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="package://agv_mujoco_sim/meshes/right_wheel.STL"/>
+      </geometry>
+      <material name="component_gray"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.1" length="0.056"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="right_wheel_jt" type="continuous">
+    <origin xyz="0 -0.297 0" rpy="-1.57079632679 0 0"/>
+    <parent link="base_link"/>
+    <child link="right_wheel"/>
+    <!-- Positive joint velocity produces forward motion (+X). -->
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.02" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_caster">
+    <inertial>
+      <origin xyz="0 0 -2.7371825402e-05" rpy="0 0 0"/>
+      <mass value="0.0399091557703669"/>
+      <inertia ixx="7.2111462855e-06" ixy="8.8035157662e-13" ixz="-8.7566291737e-14" iyy="7.2111444698e-06" iyz="2.1607959245e-13" izz="7.2594199749e-06"/>
+    </inertial>
+    <visual>
+      <geometry><mesh filename="package://agv_mujoco_sim/meshes/front_left_caster.STL"/></geometry>
+      <material name="component_gray"/>
+    </visual>
+    <collision><geometry><sphere radius="0.0212"/></geometry></collision>
+  </link>
+  <joint name="front_left_caster_jt" type="fixed">
+    <origin xyz="0.323 0.167 -0.078807" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="front_left_caster"/>
+  </joint>
+
+  <link name="front_right_caster">
+    <inertial>
+      <origin xyz="0 0 -2.7371825402e-05" rpy="0 0 0"/>
+      <mass value="0.0399091557703669"/>
+      <inertia ixx="7.2111462855e-06" ixy="8.8035157716e-13" ixz="-8.7566300715e-14" iyy="7.2111444698e-06" iyz="2.1607958912e-13" izz="7.2594199749e-06"/>
+    </inertial>
+    <visual>
+      <geometry><mesh filename="package://agv_mujoco_sim/meshes/front_right_caster.STL"/></geometry>
+      <material name="component_gray"/>
+    </visual>
+    <collision><geometry><sphere radius="0.0212"/></geometry></collision>
+  </link>
+  <joint name="front_right_caster_jt" type="fixed">
+    <origin xyz="0.323 -0.167 -0.078807" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="front_right_caster"/>
+  </joint>
+
+  <link name="rear_left_caster">
+    <inertial>
+      <origin xyz="0 0 -2.7371825402e-05" rpy="0 0 0"/>
+      <mass value="0.0399091557703668"/>
+      <inertia ixx="7.2111462855e-06" ixy="8.8035157366e-13" ixz="-8.7566301701e-14" iyy="7.2111444698e-06" iyz="2.1607958824e-13" izz="7.2594199749e-06"/>
+    </inertial>
+    <visual>
+      <geometry><mesh filename="package://agv_mujoco_sim/meshes/rear_left_caster.STL"/></geometry>
+      <material name="component_gray"/>
+    </visual>
+    <collision><geometry><sphere radius="0.0212"/></geometry></collision>
+  </link>
+  <joint name="rear_left_caster_jt" type="fixed">
+    <origin xyz="-0.347 0.167 -0.078807" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="rear_left_caster"/>
+  </joint>
+
+  <link name="rear_right_caster">
+    <inertial>
+      <origin xyz="0 0 -2.7371825402e-05" rpy="0 0 0"/>
+      <mass value="0.0399091557703668"/>
+      <inertia ixx="7.2111459706e-06" ixy="-1.1169235652e-12" ixz="-1.2014432927e-13" iyy="7.2111447847e-06" iyz="-1.9980887354e-13" izz="7.2594199749e-06"/>
+    </inertial>
+    <visual>
+      <geometry><mesh filename="package://agv_mujoco_sim/meshes/rear_right_caster.STL"/></geometry>
+      <material name="component_gray"/>
+    </visual>
+    <collision><geometry><sphere radius="0.0212"/></geometry></collision>
+  </link>
+  <joint name="rear_right_caster_jt" type="fixed">
+    <origin xyz="-0.347 -0.167 -0.078807" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="rear_right_caster"/>
+  </joint>
+
+  <link name="imu">
+    <inertial>
+      <origin xyz="0.0023989165 0 -0.0108251693" rpy="0 0 0"/>
+      <mass value="0.0350113154456988"/>
+      <inertia ixx="4.9486481208e-06" ixy="2.0030538049e-12" ixz="-1.7595997497e-08" iyy="8.8682844667e-06" iyz="6.5460652693e-23" izz="1.1262903048e-05"/>
+    </inertial>
+    <visual>
+      <geometry><mesh filename="package://agv_mujoco_sim/meshes/imu.STL"/></geometry>
+      <material name="component_gray"/>
+    </visual>
+  </link>
+  <joint name="imu_jt" type="fixed">
+    <origin xyz="0 0 0.1091" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="imu"/>
+  </joint>
+
+  <link name="lidar">
+    <inertial>
+      <origin xyz="0.0038697684 -1.4554375616e-05 -0.0055496380" rpy="0 0 0"/>
+      <mass value="0.165382751635991"/>
+      <inertia ixx="7.8865183611e-05" ixy="4.8471764092e-08" ixz="2.1847944396e-06" iyy="7.5190291494e-05" iyz="2.8860157251e-08" izz="1.0994675306e-04"/>
+    </inertial>
+    <visual>
+      <geometry><mesh filename="package://agv_mujoco_sim/meshes/lidar.STL"/></geometry>
+      <material name="lidar_gray"/>
+    </visual>
+  </link>
+  <joint name="lidar_jt" type="fixed">
+    <origin xyz="0.33152 0 0.11235" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="lidar"/>
+  </joint>
+
+</robot>

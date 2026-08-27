@@ -1,0 +1,19 @@
+mujoco_ros_bridge:
+  ros__parameters:
+    # Only parameters consumed by the simulator belong in this runtime file.
+    # Hardware inventory and unverified motor details are intentionally not
+    # part of the SAC/MPPI interface.
+    wheel_radius: 0.1
+    wheel_separation_command: 0.636
+    wheel_separation_odom: 0.636
+    max_wheel_speed_rad_s: 8.3775804096
+
+    motor_command_rate_hz: 20.0
+    wheel_odom_rate_hz: 20.0
+    imu_rate_hz: 50.0
+    lidar_rate_hz: 10.0
+
+    base_frame: base_foot_link
+    imu_frame: imu
+    lidar_frame: lidar
+    wheel_odom_topic: /wheel/odom

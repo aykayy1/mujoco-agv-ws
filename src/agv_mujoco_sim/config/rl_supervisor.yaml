@@ -1,0 +1,17 @@
+rl_velocity_supervisor:
+  ros__parameters:
+    # SAC may only reduce the verified MPPI baseline. Nav2/safety retain final
+    # authority over cmd_vel.
+    controller_node: /controller_server
+    speed_limit_topic: /speed_limit
+    baseline_vx: 0.40
+    baseline_wz: 0.50
+    scale_min: 0.40
+    scale_max: 1.00
+
+    # SAC updates slowly; filtering and slew limits prevent abrupt MPPI limits.
+    update_hz: 5.0
+    watchdog_timeout: 2.5
+    scale_slew_rate: 0.25
+    lowpass_alpha: 0.35
+    request_timeout: 1.0

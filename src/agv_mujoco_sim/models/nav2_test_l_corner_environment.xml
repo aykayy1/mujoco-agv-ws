@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nav2 test arena: L corridor. -->
+<mujocoinclude>
+  <geom name="l_corner_rear_wall" group="0" pos="-1.65 0 0.5" size="0.15 1.15 0.5" type="box" rgba="0.72 0.72 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="l_corner_bottom_wall" group="0" pos="2.25 -1.15 0.5" size="3.9 0.15 0.5" type="box" rgba="0.72 0.72 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="l_corner_inner_horizontal" group="0" pos="1.1 1.15 0.5" size="2.75 0.15 0.5" type="box" rgba="0.72 0.72 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="l_corner_inner_vertical" group="0" pos="3.85 4.15 0.5" size="0.15 3 0.5" type="box" rgba="0.72 0.72 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="l_corner_outer_vertical" group="0" pos="6.15 3 0.5" size="0.15 4.15 0.5" type="box" rgba="0.72 0.72 0.72 1" friction="1.0 0.005 0.0001"/>
+  <geom name="l_corner_top_wall" group="0" pos="5 7.15 0.5" size="1.15 0.15 0.5" type="box" rgba="0.72 0.72 0.72 1" friction="1.0 0.005 0.0001"/>
+</mujocoinclude>
