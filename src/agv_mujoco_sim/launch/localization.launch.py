@@ -18,7 +18,7 @@ def generate_launch_description():
     
     # THÊM MỚI: Đường dẫn mặc định tới file bản đồ trong thư mục "map"
     default_map_file = PathJoinSubstitution(
-        [package_share, "maps", "transfer_combined_arena.yaml"]
+        [package_share, "maps", "rl_trainingv2.yaml"]
     )
 
     stock_localization_launch = PathJoinSubstitution(

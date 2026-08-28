@@ -117,7 +117,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "model_file",
-            default_value="agv_spawn_transfer_arena.xml",
+            default_value="rl_trainingworld.xml",
             description=(
                 "MuJoCo XML filename installed in the package models directory"
             ),
