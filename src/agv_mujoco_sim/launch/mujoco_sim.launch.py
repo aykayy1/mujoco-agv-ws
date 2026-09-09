@@ -117,7 +117,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "model_file",
-            default_value="rl_trainingworld.xml",
+            default_value="warehouse_20x20.xml",
             description=(
                 "MuJoCo XML filename installed in the package models directory"
             ),

@@ -837,7 +837,12 @@ class AgvRlEnv(gym.Env):
 
         observation, info = self._observation()
         distance = float(info["distance_to_goal"])
-        minimum_obstacle_distance = float(info["min_lidar"])
+        # [PATCH] Dùng min_lidar_episode (tích luỹ liên tục từ mọi bản tin
+        # lidar nhận được kể từ lần reset gần nhất) thay vì min_lidar (chỉ
+        # là 1 lát cắt tức thời tại đúng thời điểm đọc). Nếu robot chạm
+        # tường thoáng qua rồi bị đẩy bật ra trước khi step() kịp đọc,
+        # min_lidar sẽ bỏ sót va chạm đó - min_lidar_episode thì không.
+        minimum_obstacle_distance = float(info["min_lidar_episode"])
         progress = self.previous_distance - distance
 
         reward_progress = 15.0 * progress
@@ -851,11 +856,28 @@ class AgvRlEnv(gym.Env):
 
         physical_collision = bool(info["collision_state"])
         lidar_collision = minimum_obstacle_distance < self.COLLISION_DISTANCE
-        if physical_collision or lidar_collision:
+        # [PATCH] Thêm contact_count làm nguồn thứ 3, độc lập, đến trực
+        # tiếp từ physics engine MuJoCo (topic /contact_count). Trước đây
+        # info["contact_count"] được track nhưng KHÔNG được dùng ở đâu cả
+        # trong quyết định va chạm - nếu /collision_state bị cấu hình sai
+        # hoặc không publish đúng lúc, đây là lưới an toàn dự phòng.
+        contact_collision = int(info["contact_count"]) > 0
+        if physical_collision or lidar_collision or contact_collision:
             reward_safety = self.COLLISION_REWARD
             terminated = True
             reason = "collision"
             self._needs_hard_reset = True  # CHỈ KHI NÀY MỚI BẬT CỜ RESET VỀ 0,0
+            # [PATCH] Log rõ nguồn nào phát hiện va chạm - hữu ích để debug
+            # xem /collision_state có đang publish đúng không, hay chỉ có
+            # lidar/contact_count bắt được.
+            print(
+                "💥 VA CHẠM PHÁT HIỆN BỞI: "
+                f"physical_collision={physical_collision}, "
+                f"lidar_collision={lidar_collision} "
+                f"(min={minimum_obstacle_distance:.3f}m), "
+                f"contact_collision={contact_collision} "
+                f"(contact_count={info['contact_count']})"
+            )
 
         elif minimum_obstacle_distance <= self.SAFE_DISTANCE:
             reward_safety = max(
@@ -932,6 +954,7 @@ class AgvRlEnv(gym.Env):
                 "applied_action": [float(value) for value in applied],
                 "physical_collision": physical_collision,
                 "lidar_collision": lidar_collision,
+                "contact_collision": contact_collision,  # [PATCH] để debug/log riêng nguồn này
                 "reward_progress": reward_progress,
                 "reward_safety": reward_safety,
                 "reward_speed": reward_speed,
