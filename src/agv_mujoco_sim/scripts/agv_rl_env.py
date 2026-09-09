@@ -7,6 +7,8 @@ Updated with:
 - Continuing Task mode (episodes do not terminate on goal reach/abort).
 - Random & Safe goal generation using Global Costmap across the map.
 - Soft Reset on Truncation: Never reset to (0,0) unless there's a collision.
+- [PATCH] info["is_success"] now populated at episode end so SB3's
+  ep_success_buffer / rollout/success_rate are no longer empty.
 """
 
 from __future__ import annotations
@@ -110,7 +112,7 @@ class AgvRosInterface(Node):
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
-        
+
         self.create_subscription(
             LaserScan,
             "/scan_raw",
@@ -244,7 +246,7 @@ class AgvRosInterface(Node):
         with self.lock:
             if self.costmap is None:
                 return False
-            
+
             info = self.costmap.info
             mx = int((x - info.origin.position.x) / info.resolution)
             my = int((y - info.origin.position.y) / info.resolution)
@@ -562,7 +564,7 @@ class AgvRlEnv(gym.Env):
         [0.40, 14.0, 5.0, 3.0],
         dtype=np.float32,
     )
-    
+
     # KHÔI PHỤC COMBINED_GOALS để train_sac.py có thể đọc được
     COMBINED_GOALS: Tuple[Goal, ...] = (
         (9.5, 0.0, 0.0),
@@ -579,6 +581,12 @@ class AgvRlEnv(gym.Env):
     COLLISION_REWARD = -50.0
     GOAL_REWARD = 100.0
     NAV_ABORT_REWARD = -30.0
+
+    # [PATCH] Nếu True: chỉ tính episode là "thành công" khi đã tới >=1 goal
+    # VÀ episode không kết thúc do va chạm. Nếu False: chỉ cần đã từng tới
+    # goal là tính thành công (kể cả nếu sau đó va chạm). Xem giải thích ở
+    # cuối phương thức step().
+    SUCCESS_REQUIRES_NO_COLLISION = True
 
     def __init__(
         self,
@@ -629,7 +637,7 @@ class AgvRlEnv(gym.Env):
         self.closed = False
 
         # Chỉ Reset Hard (về 0,0) ở lần chạy đầu tiên hoặc khi có va chạm
-        self._needs_hard_reset = True 
+        self._needs_hard_reset = True
 
         # Các biến bổ sung cho Random Goal Generation
         self.min_goal_distance = 1.0
@@ -671,15 +679,15 @@ class AgvRlEnv(gym.Env):
             width_m = costmap_info.width * costmap_info.resolution
             height_m = costmap_info.height * costmap_info.resolution
 
-            max_global_attempts = self.max_goal_generation_attempts * 5 
+            max_global_attempts = self.max_goal_generation_attempts * 5
 
             for _ in range(max_global_attempts):
                 cand_x = float(self.np_random.uniform(origin_x, origin_x + width_m))
                 cand_y = float(self.np_random.uniform(origin_y, origin_y + height_m))
-                
+
                 if math.hypot(cand_x - robot_x, cand_y - robot_y) < self.min_goal_distance:
                     continue
-                
+
                 if self.ros.is_position_free(cand_x, cand_y):
                     self.goal = (cand_x, cand_y, 0.0)
                     print(f"[Goal] Đã sinh đích toàn map thành công: ({cand_x:.2f}, {cand_y:.2f})")
@@ -692,7 +700,7 @@ class AgvRlEnv(gym.Env):
                 dy = float(self.np_random.uniform(-r_max, r_max))
                 if math.hypot(dx, dy) < self.min_goal_distance:
                     continue
-                
+
                 cand_x = robot_x + dx
                 cand_y = robot_y + dy
                 if self.ros.is_position_free(cand_x, cand_y):
@@ -785,9 +793,9 @@ class AgvRlEnv(gym.Env):
         options: Optional[Dict[str, Any]] = None,
     ):
         super().reset(seed=seed)
-        
+
         self.ros.cancel_navigation()
-        
+
         if self._needs_hard_reset:
             print("\n[Môi trường] Khởi tạo hoặc Va chạm: Dịch chuyển robot về (0,0)...")
             self.ros.reset_simulation()
@@ -806,7 +814,7 @@ class AgvRlEnv(gym.Env):
         self.ros.reset_episode_flags()
         self.ros.clear_costmaps(timeout=10.0)
         self._apply_action(self.SOURCE_NOMINAL_ACTION)
-        
+
         # Luôn tự động random goal mới ngay khi reset
         self.goals_reached_this_episode = 0
         self._generate_new_goal()
@@ -847,8 +855,8 @@ class AgvRlEnv(gym.Env):
             reward_safety = self.COLLISION_REWARD
             terminated = True
             reason = "collision"
-            self._needs_hard_reset = True # CHỈ KHI NÀY MỚI BẬT CỜ RESET VỀ 0,0
-            
+            self._needs_hard_reset = True  # CHỈ KHI NÀY MỚI BẬT CỜ RESET VỀ 0,0
+
         elif minimum_obstacle_distance <= self.SAFE_DISTANCE:
             reward_safety = max(
                 -5.0
@@ -867,20 +875,20 @@ class AgvRlEnv(gym.Env):
             reward_goal = self.GOAL_REWARD
             self.goals_reached_this_episode += 1
             print(f"✅ ĐÃ TỚI ĐÍCH! (Tổng: {self.goals_reached_this_episode}) -> Đang sinh goal mới...")
-            
+
             self._generate_new_goal()
             self.ros.send_navigation_goal(*self.goal)
-            
+
             _, _, distance, _ = self._pose_and_distance()
             reason = "success_but_continue"
 
         elif not terminated and nav_status == GoalStatus.STATUS_ABORTED:
             reward_goal = self.NAV_ABORT_REWARD
             print("⚠️ NAV2 BỊ KẸT (ABORTED) -> Đang sinh goal mới...")
-            
+
             self._generate_new_goal()
             self.ros.send_navigation_goal(*self.goal)
-            
+
             _, _, distance, _ = self._pose_and_distance()
             reason = "aborted_but_continue"
 
@@ -896,6 +904,27 @@ class AgvRlEnv(gym.Env):
             + reward_goal
         )
         self.previous_distance = distance
+
+        # [PATCH] Populate info["is_success"] khi episode thực sự kết thúc,
+        # để SB3 (ep_success_buffer / rollout/success_rate) đọc được.
+        # Đây là continuing task: robot có thể tới nhiều goal trong 1
+        # episode (goals_reached_this_episode đếm số lần). Ta coi episode
+        # là "thành công" nếu đã tới được >=1 goal.
+        #
+        # SUCCESS_REQUIRES_NO_COLLISION=True (mặc định): nếu robot tới goal
+        # rồi SAU ĐÓ vẫn đâm trước khi episode kết thúc, KHÔNG tính là
+        # thành công - vì mục tiêu là điều hướng an toàn, không chỉ là
+        # "đã từng chạm goal".
+        if terminated or truncated:
+            reached_at_least_one_goal = self.goals_reached_this_episode > 0
+            ended_in_collision = reason == "collision"
+            if self.SUCCESS_REQUIRES_NO_COLLISION:
+                info["is_success"] = (
+                    reached_at_least_one_goal and not ended_in_collision
+                )
+            else:
+                info["is_success"] = reached_at_least_one_goal
+
         info.update(
             {
                 "termination_reason": reason,
