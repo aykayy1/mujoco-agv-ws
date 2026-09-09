@@ -316,7 +316,7 @@
         <geom name="column_2" type="box" pos="19.3 19.3 1.5" size="0.25 0.25 1.5" material="mat_column"/>
         <geom name="column_3" type="box" pos="-19.3 -19.3 1.5" size="0.25 0.25 1.5" material="mat_column"/>
         <geom name="column_4" type="box" pos="19.3 -19.3 1.5" size="0.25 0.25 1.5" material="mat_column"/>
-        <geom name="column_5" type="box" pos="0.3 -0.5 1.5" size="0.25 0.25 1.5" material="mat_column"/>
+        <geom name="column_5" type="box" pos="0.3 -3.0 1.5" size="0.25 0.25 1.5" material="mat_column"/>
         <geom name="column_6" type="box" pos="0.3 -19.3 1.5" size="0.25 0.25 1.5" material="mat_column"/>
         <geom name="column_7" type="box" pos="-19.3 0.5 1.5" size="0.25 0.25 1.5" material="mat_column"/>
         <geom name="column_8" type="box" pos="19.3 0.5 1.5" size="0.25 0.25 1.5" material="mat_column"/>
