@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<mujoco model="industrial_warehouse_30x30_tight">
+<mujoco model="dr_warehouse_advanced_40x40">
 
   <compiler angle="degree" meshdir="../meshes" autolimits="true"/>
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
 
   <visual>
-    <headlight ambient="0.4 0.4 0.4" diffuse="0.8 0.8 0.8" specular="0.1 0.1 0.1"/>
+    <headlight ambient="0.5 0.5 0.5" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2"/>
   </visual>
 
-  <statistic center="0 0 0.2" extent="1.5"/>
+  <statistic center="0 0 0.2" extent="2.0"/>
 
   <default>
     <joint damping="0.1" armature="0.001"/>
@@ -18,15 +18,22 @@
     <default class="collision">
       <geom group="3" density="0" friction="1.0 0.005 0.0001" solref="0.005 1" solimp="0.9 0.95 0.001"/>
     </default>
-    
-    <!-- Lớp mặc định cho Pallet để code ngắn gọn hơn -->
-    <default class="pallet_wood">
-      <geom type="box" material="mat_pallet" group="1" contype="0" conaffinity="0"/>
+    <!-- Template cho chân kệ (Lidar có thể quét trúng) -->
+    <default class="pod_leg">
+      <geom type="box" size="0.05 0.05 0.3" rgba="0.2 0.2 0.2 1" group="3"/>
+    </default>
+    <!-- Template cho mặt kệ (Cao hơn tầm quét của Lidar 2D) -->
+    <default class="pod_top">
+      <geom type="box" size="0.6 0.6 0.05" rgba="0.85 0.45 0.05 1" group="3"/>
+    </default>
+    <!-- Template cho kệ khối đặc (Heavy Racks) -->
+    <default class="heavy_rack">
+      <geom type="box" size="0.8 4.0 1.5" rgba="0.15 0.15 0.18 1" group="3"/>
     </default>
   </default>
 
   <asset>
-    <!-- Assets của Robot (Giữ nguyên) -->
+    <!-- Assets Robot -->
     <mesh name="base_link_mesh" file="base_link.STL"/>
     <mesh name="left_wheel_mesh" file="left_wheel.STL"/>
     <mesh name="right_wheel_mesh" file="right_wheel.STL"/>
@@ -37,113 +44,113 @@
     <mesh name="imu_mesh" file="imu.STL"/>
     <mesh name="lidar_mesh" file="lidar.STL"/>
 
-    <!-- Hệ màu công nghiệp -->
-    <material name="mat_floor"     rgba="0.80 0.82 0.85 1"/> <!-- Bê tông mài -->
-    <material name="mat_wall"      rgba="0.25 0.26 0.28 1"/> <!-- Tường xám -->
-    <material name="mat_conveyor"  rgba="0.20 0.20 0.25 1"/> <!-- Băng chuyền thép -->
-    <material name="mat_roller"    rgba="0.75 0.75 0.75 1"/> <!-- Con lăn kim loại -->
-    <material name="mat_pallet"    rgba="0.65 0.50 0.35 1"/> <!-- Gỗ Pallet -->
+    <!-- Materials -->
+    <material name="mat_floor"     rgba="0.80 0.82 0.85 1"/>
+    <material name="mat_wall"      rgba="0.20 0.22 0.25 1"/>
+    <material name="mat_conveyor"  rgba="0.60 0.60 0.65 1"/>
+    <material name="mat_pallet"    rgba="0.55 0.45 0.30 1"/>
   </asset>
 
   <worldbody>
-    <light directional="true" pos="0 0 10" dir="0 0 -1" diffuse="0.9 0.9 0.9"/>
+    <light directional="true" pos="0 0 15" dir="0 0 -1" diffuse="0.9 0.9 0.9"/>
+    <geom name="ground_plane" type="plane" size="20 20 0.1" material="mat_floor" friction="1.0 0.005 0.0001"/>
 
-    <!-- Mặt sàn 30x30m (half-size = 15) -->
-    <geom name="ground_plane" type="plane" size="15 15 0.1" material="mat_floor" friction="1.0 0.005 0.0001"/>
-
-    <!-- BOUNDARY WALLS -->
+    <!-- Tường bao ngoại vi 40x40m -->
     <body name="boundary_walls">
-        <geom name="wall_north" type="box" pos="0 15 1.0"  size="15 0.1 1.0" material="mat_wall"/>
-        <geom name="wall_south" type="box" pos="0 -15 1.0" size="15 0.1 1.0" material="mat_wall"/>
-        <geom name="wall_east"  type="box" pos="15 0 1.0"  size="0.1 15 1.0" material="mat_wall"/>
-        <geom name="wall_west"  type="box" pos="-15 0 1.0" size="0.1 15 1.0" material="mat_wall"/>
+        <geom name="wall_north" type="box" pos="0 20 1.0"  size="20 0.1 1.0" material="mat_wall"/>
+        <geom name="wall_south" type="box" pos="0 -20 1.0" size="20 0.1 1.0" material="mat_wall"/>
+        <geom name="wall_east"  type="box" pos="20 0 1.0"  size="0.1 20 1.0" material="mat_wall"/>
+        <geom name="wall_west"  type="box" pos="-20 0 1.0" size="0.1 20 1.0" material="mat_wall"/>
     </body>
 
-    <!-- ========================================== -->
-    <!-- KHU VỰC 1: BĂNG CHUYỀN & PICK-UP (Conveyor Zone) -->
-    <!-- Nằm ở góc trên bên phải. Robot lấy hàng ở đầu băng chuyền -->
-    <!-- ========================================== -->
-    <body name="conveyor_system" pos="6 10 0">
-        <!-- Khung băng chuyền chính -->
-        <geom name="conveyor_body" type="box" pos="4 0 0.35" size="4.0 0.4 0.3" material="mat_conveyor"/>
-        <geom name="conveyor_belt" type="box" pos="4 0 0.66" size="4.0 0.38 0.01" material="mat_roller"/>
+    <!-- =========================================================
+         KHU VỰC 1: KIVA POD GRID (Robot chui gầm để lấy hàng)
+         Mỗi Pod có 4 chân. Robot phải luồn lách qua các chân này.
+         Tạo thành một mê cung điểm mù cực độ cho SLAM.
+         ========================================================= -->
+    <body name="amr_pod_zone">
+        <!-- Hàng 1 -->
+        <body pos="-16 16 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-12 16 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-8 16 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-4 16 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <!-- Hàng 2 -->
+        <body pos="-16 12 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-12 12 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-8 12 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-4 12 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <!-- Hàng 3 -->
+        <body pos="-16 8 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-12 8 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-8 8 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+        <body pos="-4 8 0"><geom class="pod_top" pos="0 0 0.6"/><geom class="pod_leg" pos="0.55 0.55 0.3"/><geom class="pod_leg" pos="-0.55 0.55 0.3"/><geom class="pod_leg" pos="0.55 -0.55 0.3"/><geom class="pod_leg" pos="-0.55 -0.55 0.3"/></body>
+    </body>
+
+    <!-- =========================================================
+         KHU VỰC 2: HEAVY DUTY RACKING (Khối đặc chặn tín hiệu Lidar)
+         Tạo hành lang hẹp (aisle) dài để test khả năng giữ làn.
+         ========================================================= -->
+    <body name="heavy_racking_zone">
+        <geom class="heavy_rack" pos="6 14 1.5"/>
+        <geom class="heavy_rack" pos="10 14 1.5"/>
+        <geom class="heavy_rack" pos="14 14 1.5"/>
         
-        <!-- Chân đỡ băng chuyền -->
-        <geom type="box" pos="0.2 0 0.15" size="0.05 0.4 0.15" material="mat_conveyor"/>
-        <geom type="box" pos="4.0 0 0.15" size="0.05 0.4 0.15" material="mat_conveyor"/>
-        <geom type="box" pos="7.8 0 0.15" size="0.05 0.4 0.15" material="mat_conveyor"/>
+        <geom class="heavy_rack" pos="6 4 1.5"/>
+        <geom class="heavy_rack" pos="10 4 1.5"/>
+        <geom class="heavy_rack" pos="14 4 1.5"/>
+    </body>
 
-        <!-- Vùng Pick-up: Các Pallet chờ lấy ở đuôi băng chuyền (Tạo không gian rất hẹp xung quanh) -->
-        <body name="pick_pallet_1" pos="-1 0 0">
-            <!-- Collision Tàng hình cho Lidar/Vật lý (Half-size: 0.6x0.4x0.075) -->
-            <geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/>
-            <!-- Visual Gỗ -->
-            <geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/>
-            <geom class="pallet_wood" pos="0  0.35 0.06" size="0.6 0.05 0.06"/>
-            <geom class="pallet_wood" pos="0  0.0  0.06" size="0.6 0.05 0.06"/>
-            <geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/>
-        </body>
+    <!-- =========================================================
+         KHU VỰC 3: CONVEYOR & PHÂN LOẠI (Góc dưới phải)
+         Băng chuyền trung tâm có nhánh phụ.
+         ========================================================= -->
+    <body name="conveyor_zone">
+        <!-- Băng chuyền chính -->
+        <geom type="box" pos="10 -15 0.4" size="8.0 0.6 0.4" material="mat_conveyor"/>
+        <!-- Băng chuyền nhánh -->
+        <geom type="box" pos="10 -9 0.4" size="0.6 5.4 0.4" material="mat_conveyor"/>
         
-        <body name="pick_pallet_2" pos="-2.5 0 0">
+        <!-- Bàn làm việc đục lỗ (Pick stations) -->
+        <geom type="box" pos="4 -15 0.5" size="1.0 1.0 0.5" rgba="0.9 0.9 0.9 1"/>
+        <geom type="box" pos="10 -3 0.5" size="1.0 1.0 0.5" rgba="0.9 0.9 0.9 1"/>
+    </body>
+
+    <!-- =========================================================
+         KHU VỰC 4: STAGING & TEMPORARY PALLETS (Góc dưới trái)
+         Pallet tầm thấp, ngổn ngang, chặn các góc hẹp.
+         ========================================================= -->
+    <body name="staging_zone">
+        <!-- Pallet 1 -->
+        <body pos="-15 -15 0" euler="0 0 25">
             <geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/>
-            <geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/>
-            <geom class="pallet_wood" pos="0  0.35 0.06" size="0.6 0.05 0.06"/>
-            <geom class="pallet_wood" pos="0  0.0  0.06" size="0.6 0.05 0.06"/>
-            <geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/>
+            <geom type="box" pos="0 0 0.14" size="0.6 0.4 0.01" material="mat_pallet"/>
+            <geom type="box" pos="0 0.35 0.06" size="0.6 0.05 0.06" material="mat_pallet"/>
+            <geom type="box" pos="0 0 0.06" size="0.6 0.05 0.06" material="mat_pallet"/>
+            <geom type="box" pos="0 -0.35 0.06" size="0.6 0.05 0.06" material="mat_pallet"/>
         </body>
+        <!-- Pallet 2 -->
+        <body pos="-10 -12 0" euler="0 0 -40">
+            <geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/>
+            <geom type="box" pos="0 0 0.14" size="0.6 0.4 0.01" material="mat_pallet"/>
+            <geom type="box" pos="0 0.35 0.06" size="0.6 0.05 0.06" material="mat_pallet"/>
+            <geom type="box" pos="0 0 0.06" size="0.6 0.05 0.06" material="mat_pallet"/>
+            <geom type="box" pos="0 -0.35 0.06" size="0.6 0.05 0.06" material="mat_pallet"/>
+        </body>
+        <!-- Cột nhà kho (Pillars) -->
+        <geom type="cylinder" pos="-6 -10 2.0" size="0.4 2.0" rgba="0.8 0.1 0.1 1"/>
+        <geom type="cylinder" pos="-6 -18 2.0" size="0.4 2.0" rgba="0.8 0.1 0.1 1"/>
     </body>
 
-    <!-- ========================================== -->
-    <!-- KHU VỰC 2: KHO LƯU TRỮ PALLET (Dense Storage) -->
-    <!-- Ép robot đi vào các hành lang chỉ rộng 1.6m -->
-    <!-- ========================================== -->
-    <body name="dense_pallets">
-        <!-- Dãy 1 (x = -10) -->
-        <body name="rack1_p1" pos="-10 8 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack1_p2" pos="-10 5 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack1_p3" pos="-10 2 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack1_p4" pos="-10 -1 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack1_p5" pos="-10 -4 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-
-        <!-- Dãy 2 (x = -7.2) -> Hành lang rộng 1.6m -->
-        <body name="rack2_p1" pos="-7.2 8 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack2_p2" pos="-7.2 5 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack2_p3" pos="-7.2 2 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack2_p4" pos="-7.2 -1 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack2_p5" pos="-7.2 -4 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-
-        <!-- Dãy 3 (x = -4.4) -->
-        <body name="rack3_p1" pos="-4.4 8 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack3_p2" pos="-4.4 5 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack3_p3" pos="-4.4 2 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="rack3_p4" pos="-4.4 -1 0"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-    </body>
-
-    <!-- ========================================== -->
-    <!-- KHU VỰC 3: STAGING AREA CHỨA PALLET XOAY LỘN XỘN -->
-    <!-- Cản trở Global Planner, ép Local Planner hoạt động mạnh -->
-    <!-- ========================================== -->
-    <body name="scattered_pallets">
-        <body name="sc_pal_1" pos="5 -8 0" euler="0 0 15"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="sc_pal_2" pos="8 -10 0" euler="0 0 -30"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <body name="sc_pal_3" pos="3 -12 0" euler="0 0 45"><geom type="box" pos="0 0 0.075" size="0.6 0.4 0.075" rgba="0 0 0 0"/><geom class="pallet_wood" pos="0 0 0.14" size="0.6 0.4 0.01"/><geom class="pallet_wood" pos="0 0.35 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 0 0.06" size="0.6 0.05 0.06"/><geom class="pallet_wood" pos="0 -0.35 0.06" size="0.6 0.05 0.06"/></body>
-        <!-- Chướng ngại vật tĩnh ngẫu nhiên -->
-        <geom name="pillar_1" type="cylinder" pos="-1 -8 0.5" size="0.3 0.5" material="mat_conveyor"/>
-        <geom name="pillar_2" type="cylinder" pos="11 0 0.5" size="0.3 0.5" material="mat_conveyor"/>
-    </body>
-
-    <!-- ========================================== -->
-    <!-- ROBOT AGV (Giữ nguyên thông số động học của bạn) -->
-    <!-- ========================================== -->
+    <!-- =========================================================
+         ROBOT GỐC
+         ========================================================= -->
     <body name="base_link" pos="0 0 0.15">
       <freejoint name="base_freejoint"/>
       <inertial pos="-0.01641684226393 -2.127036027730e-08 0.01536357867772" mass="77.76660059782901" fullinertia="3.2338238997685766 4.5790630022931795 7.535284316709289 6.94917763249993e-07 -0.010447117841865663 -5.34948547228727e-08"/>
-      
       <geom name="base_visual" class="visual" mesh="base_link_mesh" rgba="0.75 0.75 0.75 1"/>
       <geom name="base_collision_rear" class="collision" type="box" pos="-0.322 0 0.015" size="0.100 0.357 0.0725" rgba="0 0 0 0"/>
       <geom name="base_collision_center" class="collision" type="box" pos="-0.012 0 0.015" size="0.210 0.250 0.0725" rgba="0 0 0 0"/>
       <geom name="base_collision_front" class="collision" type="box" pos="0.298 0 0.015" size="0.100 0.357 0.0725" rgba="0 0 0 0"/>
-      
       <site name="base_foot_link" type="sphere" pos="0 0 -0.1" size="0.005" rgba="0 0 0 0"/>
 
       <body name="left_wheel" pos="0 0.297 0" euler="-90 0 0">
