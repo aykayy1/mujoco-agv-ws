@@ -9,6 +9,8 @@ Updated with:
 - Soft Reset on Truncation: Never reset to (0,0) unless there's a collision.
 - [PATCH] info["is_success"] now populated at episode end so SB3's
   ep_success_buffer / rollout/success_rate are no longer empty.
+- [PATCH] Hard reset after collision now RETRIES automatically instead of
+  crashing the whole training process if one ROS2 call times out.
 """
 
 from __future__ import annotations
@@ -588,6 +590,14 @@ class AgvRlEnv(gym.Env):
     # cuối phương thức step().
     SUCCESS_REQUIRES_NO_COLLISION = True
 
+    # [PATCH] Số lần thử lại tối đa cho quy trình hard reset sau va chạm,
+    # và thời gian chờ giữa các lần thử. Trước đây nếu BẤT KỲ bước nào
+    # (reset_simulation/reset_ekf/wait_for_reset_state...) timeout, lỗi sẽ
+    # bay thẳng lên và làm CRASH TOÀN BỘ script training - không hề quay
+    # lại (0,0,0) như mong đợi, mà dừng hẳn không chạy tiếp.
+    HARD_RESET_MAX_ATTEMPTS = 5
+    HARD_RESET_RETRY_DELAY = 2.0
+
     def __init__(
         self,
         goal: Goal = (9.5, 0.0, 0.0),
@@ -786,6 +796,55 @@ class AgvRlEnv(gym.Env):
         self.ros.set_mppi_parameters(*[float(value) for value in applied])
         return applied
 
+    def _perform_hard_reset(self) -> None:
+        """[PATCH] Thực hiện chuỗi hard-reset (về 0,0,0) với cơ chế thử lại.
+
+        Trước đây, nếu bất kỳ bước nào trong reset_simulation/reset_ekf/
+        reset_amcl/wait_for_reset_state bị timeout (rất dễ xảy ra khi CPU
+        tải cao hoặc MuJoCo/EKF chưa kịp ổn định), exception sẽ bay thẳng
+        lên trên và làm CRASH TOÀN BỘ script training - dừng hẳn, không hề
+        quay lại (0,0,0) như mong đợi. Giờ đây, nếu 1 lần thử thất bại, sẽ
+        tự động thử lại tối đa HARD_RESET_MAX_ATTEMPTS lần trước khi thực
+        sự báo lỗi.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, self.HARD_RESET_MAX_ATTEMPTS + 1):
+            try:
+                print(
+                    f"\n[Môi trường] Khởi tạo hoặc Va chạm: Dịch chuyển robot "
+                    f"về (0,0,0)... (lần thử {attempt}/{self.HARD_RESET_MAX_ATTEMPTS})"
+                )
+                self.ros.reset_simulation()
+                self.ros.reset_ekf()
+                self.ros.reset_amcl()
+                barrier = self.ros.current_state()
+                self.ros.wait_for_reset_state(
+                    old_scan_seq=barrier["scan_seq"],
+                    old_odom_seq=barrier["odom_seq"],
+                )
+                print(f"[Môi trường] Hard reset THÀNH CÔNG (lần thử {attempt}).")
+                return
+            except Exception as exc:  # noqa: BLE001 - cố tình bắt rộng để không crash
+                last_exc = exc
+                print(
+                    f"[Môi trường] Hard reset THẤT BẠI ở lần thử {attempt}: "
+                    f"{exc!r}"
+                )
+                if attempt < self.HARD_RESET_MAX_ATTEMPTS:
+                    print(
+                        f"[Môi trường] Chờ {self.HARD_RESET_RETRY_DELAY}s rồi "
+                        f"thử lại toàn bộ chuỗi reset..."
+                    )
+                    time.sleep(self.HARD_RESET_RETRY_DELAY)
+
+        # Hết số lần thử cho phép - lúc này mới thực sự báo lỗi, kèm thông
+        # tin rõ ràng để dễ chẩn đoán (thay vì traceback mơ hồ như trước).
+        raise RuntimeError(
+            f"Hard reset thất bại sau {self.HARD_RESET_MAX_ATTEMPTS} lần thử "
+            f"liên tiếp. Lỗi cuối cùng: {last_exc!r}. Kiểm tra lại ROS2/MuJoCo "
+            f"có đang chạy ổn định không (CPU quá tải, service không phản hồi...)."
+        ) from last_exc
+
     def reset(
         self,
         *,
@@ -797,15 +856,8 @@ class AgvRlEnv(gym.Env):
         self.ros.cancel_navigation()
 
         if self._needs_hard_reset:
-            print("\n[Môi trường] Khởi tạo hoặc Va chạm: Dịch chuyển robot về (0,0)...")
-            self.ros.reset_simulation()
-            self.ros.reset_ekf()
-            self.ros.reset_amcl()
-            barrier = self.ros.current_state()
-            self.ros.wait_for_reset_state(
-                old_scan_seq=barrier["scan_seq"],
-                old_odom_seq=barrier["odom_seq"],
-            )
+            # [PATCH] Gọi qua hàm có retry thay vì gọi trực tiếp inline.
+            self._perform_hard_reset()
             self._needs_hard_reset = False
         else:
             print("\n[Môi trường] Hết giờ (Truncated): Giữ nguyên vị trí robot, chạy tiếp...")
