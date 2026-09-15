@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Fine-tune the Gazebo Phase-2 SAC checkpoint on the MuJoCo ROS graph."""
+"""Train (from scratch) or fine-tune the AgvRlEnv SAC model on the MuJoCo ROS graph.
+
+[GROUP1/GROUP2 MIGRATION] agv_rl_env.py vừa đổi observation_space từ 26D
+sang 28D (bearing tương đối + vận tốc thật) và thêm reward_smoothness —
+điều này PHÁ VỠ hợp đồng checkpoint cũ (26D/4D). File này được cập nhật để:
+- Thêm chế độ --from-scratch: tạo SAC(...) HOÀN TOÀN MỚI, KHÔNG gọi
+  SAC.load() — dùng khi không còn checkpoint nào tương thích observation
+  hiện tại (đúng tình huống hiện tại: checkpoint Gazebo cũ là 26D).
+- validate_model() không còn hardcode observation_shape=(26,) — lấy động
+  từ AgvRlEnv.OBSERVATION_DIM, để lần sau nếu observation lại đổi, không
+  cần sửa số ở đây nữa.
+- Thêm kiểm tra shape khi load replay buffer cũ (--replay-buffer), tránh
+  nạp nhầm buffer được ghi dưới observation shape KHÁC với env hiện tại
+  (lỗi này trước đây có thể âm thầm làm hỏng dữ liệu training).
+"""
 
 from __future__ import annotations
 
@@ -44,15 +58,26 @@ def default_run_dir() -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Resume the 26D/4D Gazebo SAC checkpoint and fine-tune it "
-            "against MuJoCo, AMCL and Nav2 MPPI."
+            "Train AgvRlEnv (28D observation / 4D action) against MuJoCo, "
+            "AMCL and Nav2 MPPI — either fine-tuning an existing compatible "
+            "checkpoint (--model), or starting a brand new model "
+            "(--from-scratch) when no compatible checkpoint exists."
         )
+    )
+    parser.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help=(
+            "Tạo SAC(...) HOÀN TOÀN MỚI thay vì SAC.load() — dùng khi "
+            "observation/action contract của env vừa đổi và không còn "
+            "checkpoint cũ nào tương thích (bỏ qua --model, --inspect-only)."
+        ),
     )
     parser.add_argument(
         "--model",
         type=Path,
         default=default_model_path(),
-        help="Gazebo checkpoint or a later MuJoCo fine-tune checkpoint",
+        help="Existing checkpoint to fine-tune. Bỏ qua nếu dùng --from-scratch.",
     )
     parser.add_argument(
         "--inspect-only",
@@ -68,7 +93,8 @@ def parse_args() -> argparse.Namespace:
         default=50,
         help=(
             "New MuJoCo transitions collected before the first gradient "
-            "update when no replay buffer is supplied"
+            "update when no replay buffer is supplied. Với --from-scratch, "
+            "đây chính là learning_starts của SAC."
         ),
     )
     parser.add_argument("--max-episode-steps", type=int, default=35)
@@ -118,7 +144,10 @@ def saved_sb3_version(model_path: Path) -> str:
 
 
 def validate_model(model: SAC) -> Dict[str, Any]:
-    expected_observation_shape = (26,)
+    # [MIGRATION] Trước đây hardcode (26,) — giờ lấy động từ
+    # AgvRlEnv.OBSERVATION_DIM, để nếu observation lại đổi lần nữa (ví dụ
+    # thêm Nhóm khác sau này), không cần sửa số ở đây.
+    expected_observation_shape = (AgvRlEnv.OBSERVATION_DIM,)
     expected_action_shape = (4,)
     problems = []
     if tuple(model.observation_space.shape) != expected_observation_shape:
@@ -168,24 +197,23 @@ def validate_model(model: SAC) -> Dict[str, Any]:
     }
 
 
-def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=str(path.parent),
-    )
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
-        os.replace(temporary_name, path)
-    except Exception:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
+def validate_replay_buffer_shape(model: SAC, environment: Monitor) -> None:
+    """[MIGRATION] Kiểm tra replay buffer vừa load có observation shape
+    KHỚP với env hiện tại hay không. Trước đây không có bước này — nếu bạn
+    lỡ nạp 1 buffer cũ ghi dưới observation 26D vào env giờ đang là 28D
+    (hoặc ngược lại), SB3 có thể không báo lỗi rõ ràng ngay lập tức, chỉ
+    tạo ra dữ liệu training âm thầm sai lệch (silent corruption) rất khó
+    debug về sau."""
+    buffer_obs_shape = tuple(model.replay_buffer.observations.shape[2:])
+    env_obs_shape = tuple(environment.observation_space.shape)
+    if buffer_obs_shape != env_obs_shape:
+        raise ValueError(
+            f"Replay buffer KHÔNG khớp observation shape với env hiện tại: "
+            f"buffer={buffer_obs_shape}, env={env_obs_shape}. "
+            f"Không dùng buffer này — rất có thể nó được ghi từ 1 phiên bản "
+            f"observation_space cũ (ví dụ 26D trước khi thêm bearing tương "
+            f"đối + vận tốc). Bỏ --replay-buffer để bắt đầu buffer trống."
+        )
 
 
 class FineTuneCallback(BaseCallback):
@@ -306,6 +334,27 @@ def make_environment(args: argparse.Namespace) -> Monitor:
     )
 
 
+def build_fresh_model(environment: Monitor, args: argparse.Namespace) -> SAC:
+    """[MIGRATION] Tạo SAC(...) HOÀN TOÀN MỚI — dùng cho --from-scratch.
+    Hyperparameter mặc định khớp với các script train khác trong dự án
+    (buffer_size=1e6, batch_size=256, tau=0.005, gamma=0.99)."""
+    return SAC(
+        "MlpPolicy",
+        environment,
+        learning_rate=args.learning_rate,
+        buffer_size=1_000_000,
+        learning_starts=args.warmup_steps,
+        batch_size=256,
+        tau=0.005,
+        gamma=0.99,
+        train_freq=1,
+        gradient_steps=1,
+        device=args.device,
+        seed=args.seed,
+        verbose=1,
+    )
+
+
 def main() -> int:
     args = parse_args()
     if args.total_steps <= 0:
@@ -318,25 +367,43 @@ def main() -> int:
         raise ValueError("max-episode-steps must be positive")
     if not math.isfinite(args.learning_rate) or args.learning_rate <= 0.0:
         raise ValueError("learning-rate must be finite and positive")
-
-    model_path = resolve_file(args.model, "Model checkpoint")
-    stored_version = saved_sb3_version(model_path)
-    print(
-        f"Model SB3={stored_version}; runtime SB3={sb3_runtime_version}",
-        flush=True,
-    )
-    if stored_version != "unknown" and stored_version != sb3_runtime_version:
+    if args.from_scratch and args.inspect_only:
+        raise ValueError(
+            "--inspect-only chỉ dùng để kiểm tra 1 checkpoint CÓ SẴN — "
+            "không tương thích với --from-scratch (không có checkpoint nào "
+            "để kiểm tra)."
+        )
+    if args.from_scratch and args.replay_buffer is not None:
         print(
-            "WARNING: SB3 versions differ; contract preflight must pass.",
+            "LƯU Ý: --from-scratch kèm --replay-buffer nghĩa là tạo model "
+            "MỚI nhưng tái sử dụng buffer transition CŨ — chỉ hợp lệ nếu "
+            "buffer đó được ghi dưới ĐÚNG observation_space hiện tại "
+            "(sẽ tự kiểm tra shape trước khi dùng).",
             flush=True,
         )
 
-    if args.inspect_only:
-        model = SAC.load(str(model_path), device=args.device)
-        contract = validate_model(model)
-        print(json.dumps(contract, indent=2), flush=True)
-        print("GAZEBO_PHASE2_FINETUNE_PREFLIGHT=PASS", flush=True)
-        return 0
+    model_path: Optional[Path] = None
+    stored_version = "n/a (from-scratch)"
+
+    if not args.from_scratch:
+        model_path = resolve_file(args.model, "Model checkpoint")
+        stored_version = saved_sb3_version(model_path)
+        print(
+            f"Model SB3={stored_version}; runtime SB3={sb3_runtime_version}",
+            flush=True,
+        )
+        if stored_version != "unknown" and stored_version != sb3_runtime_version:
+            print(
+                "WARNING: SB3 versions differ; contract preflight must pass.",
+                flush=True,
+            )
+
+        if args.inspect_only:
+            model = SAC.load(str(model_path), device=args.device)
+            contract = validate_model(model)
+            print(json.dumps(contract, indent=2), flush=True)
+            print("GAZEBO_PHASE2_FINETUNE_PREFLIGHT=PASS", flush=True)
+            return 0
 
     args.run_dir = args.run_dir.expanduser().resolve()
     args.run_dir.mkdir(parents=True, exist_ok=True)
@@ -349,18 +416,40 @@ def main() -> int:
 
     try:
         environment = make_environment(args)
-        model = SAC.load(
-            str(model_path),
-            env=environment,
-            device=args.device,
-            learning_rate=args.learning_rate,
-        )
-        contract = validate_model(model)
-        starting_timesteps = int(model.num_timesteps)
+
+        if args.from_scratch:
+            print(
+                "FRESH START: tạo SAC(...) HOÀN TOÀN MỚI, KHÔNG load "
+                "checkpoint nào (đúng theo kế hoạch: observation contract "
+                "vừa đổi, checkpoint cũ không còn tương thích).",
+                flush=True,
+            )
+            model = build_fresh_model(environment, args)
+            starting_timesteps = 0
+            contract = {
+                "observation_shape": list(environment.observation_space.shape),
+                "action_shape": list(environment.action_space.shape),
+                "action_low": AgvRlEnv.ACTION_LOW.tolist(),
+                "action_high": AgvRlEnv.ACTION_HIGH.tolist(),
+                "probe_action": None,
+                "num_timesteps": 0,
+            }
+        else:
+            model = SAC.load(
+                str(model_path),
+                env=environment,
+                device=args.device,
+                learning_rate=args.learning_rate,
+            )
+            contract = validate_model(model)
+            starting_timesteps = int(model.num_timesteps)
 
         if args.replay_buffer is not None:
             replay_path = resolve_file(args.replay_buffer, "Replay buffer")
             model.load_replay_buffer(str(replay_path))
+            # [MIGRATION] Kiểm tra shape ngay sau khi load — chặn sớm nếu
+            # buffer được ghi dưới observation_space KHÁC (ví dụ 26D cũ).
+            validate_replay_buffer_shape(model, environment)
             replay_loaded = True
             print(f"REPLAY BUFFER loaded: {replay_path}", flush=True)
         else:
@@ -379,7 +468,7 @@ def main() -> int:
         print(json.dumps(contract, indent=2), flush=True)
         print("GAZEBO_PHASE2_FINETUNE_PREFLIGHT=PASS", flush=True)
         print(
-            f"FINE_TUNE_START model={model_path} "
+            f"FINE_TUNE_START model={model_path if model_path else '(from-scratch)'} "
             f"suite={args.suite} sampling={args.goal_sampling} "
             f"additional_steps={args.total_steps} "
             f"learning_rate={args.learning_rate}",
@@ -411,7 +500,7 @@ def main() -> int:
             summary.update(
                 {
                     "interrupted": interrupted,
-                    "source_model": str(model_path),
+                    "source_model": str(model_path) if model_path else "from-scratch",
                     "saved_model": str(args.run_dir / f"{final_stem}.zip"),
                     "replay_buffer": replay_value,
                     "replay_buffer_loaded": replay_loaded,
@@ -422,6 +511,7 @@ def main() -> int:
                     "contract": contract,
                     "saved_sb3_version": stored_version,
                     "runtime_sb3_version": sb3_runtime_version,
+                    "from_scratch": args.from_scratch,
                 }
             )
             atomic_write_json(args.run_dir / "training_summary.json", summary)
@@ -436,6 +526,26 @@ def main() -> int:
             environment.close()
 
     return 130 if interrupted else 0
+
+
+def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        os.replace(temporary_name, path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 if __name__ == "__main__":

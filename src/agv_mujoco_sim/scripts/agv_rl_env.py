@@ -11,6 +11,18 @@ Updated with:
   ep_success_buffer / rollout/success_rate are no longer empty.
 - [PATCH] Hard reset after collision now RETRIES automatically instead of
   crashing the whole training process if one ROS2 call times out.
+- [GROUP1] Observation nay la "egocentric": goal bearing tinh TUONG DOI so
+  voi huong mui robot (khong con tuyet doi theo truc X cua map), va co
+  them van toc that (linear + angular) tu /odometry/filtered. Observation
+  shape doi tu (26,) -> (28,) -> PHA VO checkpoint contract cu, BAT BUOC
+  train lai tu dau (da xac nhan voi nguoi dung, checkpoint hien tai moi
+  ~10k step nen chi phi doi bo rat thap).
+- [GROUP2] reward_speed doi tu dung applied[0] (tran vx_max RL vua DAT,
+  khong phan anh toc do THAT) sang dung state["linear_velocity"] do THAT
+  tu odometry -> loai bo ke ho "reward hacking" (agent hoc cach set tran
+  cao ma khong can robot thuc su di nhanh). Them reward_smoothness phat
+  action thay doi dot ngot giua 2 step lien tiep (chuan hoa theo bien do
+  moi chieu action, vi cac chieu co thang do rat khac nhau).
 """
 
 from __future__ import annotations
@@ -60,7 +72,7 @@ def normalize_angle(angle: float) -> float:
 
 
 class AgvRosInterface(Node):
-    """ROS backend connecting the 26D/4D Gym contract to MuJoCo/Nav2."""
+    """ROS backend connecting the 28D/4D Gym contract to MuJoCo/Nav2."""
 
     LIDAR_BEAMS = 24
     LIDAR_ANGLE_MIN = -2.0943951
@@ -584,6 +596,23 @@ class AgvRlEnv(gym.Env):
     GOAL_REWARD = 100.0
     NAV_ABORT_REWARD = -30.0
 
+    # [GROUP1] Kích thước observation mới: 24 lidar + dist + bearing TƯƠNG
+    # ĐỐI + linear_velocity + angular_velocity = 28 (trước là 26).
+    OBSERVATION_DIM = 28
+    # [GROUP1] Hằng số chuẩn hoá vận tốc trong observation. Đặt cao hơn
+    # trần vật lý 1 chút (ACTION_HIGH[0]=1.0 cho vx_max, wz_max=0.8 trong
+    # nav2_mppi_params.yaml cho angular) để có biên độ dự phòng, tránh vượt
+    # quá [-1,1] khi robot vượt nhẹ trần do quán tính/overshoot tức thời.
+    MAX_EXPECTED_LINEAR_VELOCITY = 1.2
+    MAX_EXPECTED_ANGULAR_VELOCITY = 1.0
+
+    # [GROUP2] Trọng số phạt cho việc thay đổi action ĐỘT NGỘT giữa 2 step
+    # liên tiếp. Tính trên khoảng cách ĐÃ CHUẨN HOÁ theo biên độ mỗi chiều
+    # (ACTION_HIGH - ACTION_LOW), vì các chiều action có thang đo rất khác
+    # nhau (vx_max range ~0.95, goal_weight range ~20) — nếu không chuẩn
+    # hoá, chiều có range lớn sẽ áp đảo hoàn toàn phép phạt.
+    ACTION_SMOOTHNESS_PENALTY_WEIGHT = 0.1
+
     # [PATCH] Nếu True: chỉ tính episode là "thành công" khi đã tới >=1 goal
     # VÀ episode không kết thúc do va chạm. Nếu False: chỉ cần đã từng tới
     # goal là tính thành công (kể cả nếu sau đó va chạm). Xem giải thích ở
@@ -646,6 +675,10 @@ class AgvRlEnv(gym.Env):
         self.previous_distance = 0.0
         self.closed = False
 
+        # [GROUP2] Action ĐÃ ÁP DỤNG ở step trước — dùng để tính phạt thay
+        # đổi đột ngột. None nghĩa là "chưa có step nào" (đầu episode).
+        self.previous_applied_action: Optional[np.ndarray] = None
+
         # Chỉ Reset Hard (về 0,0) ở lần chạy đầu tiên hoặc khi có va chạm
         self._needs_hard_reset = True
 
@@ -662,7 +695,7 @@ class AgvRlEnv(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(26,),
+            shape=(self.OBSERVATION_DIM,),
             dtype=np.float32,
         )
         try:
@@ -727,19 +760,53 @@ class AgvRlEnv(gym.Env):
         self.goal = (float(robot_x + self.min_goal_distance), float(robot_y), 0.0)
 
     def _pose_and_distance(self) -> Tuple[float, float, float, float]:
-        x, y, _yaw = self.ros.get_map_pose()
+        x, y, yaw = self.ros.get_map_pose()
         dx = self.goal[0] - x
         dy = self.goal[1] - y
-        return x, y, math.hypot(dx, dy), math.atan2(dy, dx)
+        distance = math.hypot(dx, dy)
+        global_bearing = math.atan2(dy, dx)
+        # [GROUP1] Đổi từ bearing TUYỆT ĐỐI (theo trục X của map) sang
+        # bearing TƯƠNG ĐỐI so với hướng mũi robot (yaw) — quan sát
+        # "egocentric" giúp policy tổng quát hoá tốt hơn nhiều: cùng 1
+        # tình huống hình học (goal ở bên trái/phải/phía trước robot) sẽ
+        # luôn cho ra cùng 1 giá trị quan sát, bất kể robot đang quay mặt
+        # hướng nào trên bản đồ tuyệt đối. Trước đây (bearing tuyệt đối),
+        # CÙNG một tình huống tương đối nhưng robot đứng quay hướng khác
+        # sẽ cho ra observation hoàn toàn khác nhau, buộc policy phải học
+        # lại quan hệ này riêng cho từng hướng quay có thể -> tốn dữ liệu
+        # hơn nhiều, khó tổng quát hoá.
+        relative_bearing = normalize_angle(global_bearing - yaw)
+        return x, y, distance, relative_bearing
 
     def _observation(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         state = self.ros.current_state()
-        x, y, distance, global_goal_bearing = self._pose_and_distance()
+        x, y, distance, relative_bearing = self._pose_and_distance()
         scan_normalized = np.clip(
             state["lidar"] / self.MAX_SCAN_RANGE,
             0.0,
             1.0,
         )
+
+        # [GROUP1] Thêm vận tốc thật (linear + angular) vào observation.
+        # Trước đây policy hoàn toàn "mù" về tốc độ hiện tại của chính nó —
+        # chỉ biết lidar + vị trí goal, không biết bản thân đang đi nhanh
+        # hay chậm. Thiếu thông tin này khiến policy khó học các quyết
+        # định phụ thuộc vào trạng thái động lực học hiện tại.
+        linear_velocity_norm = float(
+            np.clip(
+                state["linear_velocity"] / self.MAX_EXPECTED_LINEAR_VELOCITY,
+                -1.0,
+                1.0,
+            )
+        )
+        angular_velocity_norm = float(
+            np.clip(
+                state["angular_velocity"] / self.MAX_EXPECTED_ANGULAR_VELOCITY,
+                -1.0,
+                1.0,
+            )
+        )
+
         observation = np.concatenate(
             (
                 scan_normalized,
@@ -751,16 +818,18 @@ class AgvRlEnv(gym.Env):
                             1.0,
                         ),
                         np.clip(
-                            global_goal_bearing / math.pi,
+                            relative_bearing / math.pi,
                             -1.0,
                             1.0,
                         ),
+                        linear_velocity_norm,
+                        angular_velocity_norm,
                     ],
                     dtype=np.float32,
                 ),
             )
         ).astype(np.float32)
-        if observation.shape != (26,) or not np.all(
+        if observation.shape != (self.OBSERVATION_DIM,) or not np.all(
             np.isfinite(observation)
         ):
             raise RuntimeError(
@@ -771,7 +840,11 @@ class AgvRlEnv(gym.Env):
             "y": y,
             "goal": list(self.goal),
             "distance_to_goal": distance,
-            "global_goal_bearing": global_goal_bearing,
+            # [GROUP1] đổi tên field cho đúng bản chất (trước là
+            # global_goal_bearing, tuyệt đối theo map)
+            "relative_goal_bearing": relative_bearing,
+            "linear_velocity": state["linear_velocity"],
+            "angular_velocity": state["angular_velocity"],
             "min_lidar": float(np.min(state["lidar"])),
             "min_lidar_episode": float(state["minimum_lidar"]),
             "contact_count": int(state["contact_count"]),
@@ -865,7 +938,14 @@ class AgvRlEnv(gym.Env):
 
         self.ros.reset_episode_flags()
         self.ros.clear_costmaps(timeout=10.0)
-        self._apply_action(self.SOURCE_NOMINAL_ACTION)
+        # [GROUP2] Lưu lại action nominal vừa áp dụng làm MỐC KHỞI ĐẦU cho
+        # phép tính phạt thay đổi đột ngột — để step() đầu tiên của episode
+        # vẫn được đánh giá đúng mức thay đổi so với trạng thái reset, thay
+        # vì bỏ qua hoàn toàn (previous_applied_action=None chỉ xảy ra ở
+        # episode/tiến trình đầu tiên trước reset() lần đầu).
+        self.previous_applied_action = self._apply_action(
+            self.SOURCE_NOMINAL_ACTION
+        ).copy()
 
         # Luôn tự động random goal mới ngay khi reset
         self.goals_reached_this_episode = 0
@@ -942,7 +1022,34 @@ class AgvRlEnv(gym.Env):
                 self.SAFETY_REWARD_CLIP,
             )
         else:
-            reward_speed = 2.0 * float(applied[0])
+            # [GROUP2] Dùng VẬN TỐC THẬT đo được từ /odometry/filtered,
+            # KHÔNG dùng applied[0] (chỉ là TRẦN vx_max mà RL vừa đặt cho
+            # MPPI). Trước đây agent được thưởng ngay khi ĐẶT trần cao, bất
+            # kể robot có thực sự đạt tới tốc độ đó hay không — đây chính
+            # là kẽ hở "reward hacking" khớp với hiện tượng quan sát được:
+            # model luôn đẩy vx_max lên gần 1.0 (test bằng predict
+            # deterministic) nhưng tốc độ THẬT của robot chỉ loanh quanh
+            # 0.5 m/s. Đổi sang dùng vận tốc thật buộc agent phải học cách
+            # đặt tham số sao cho robot THỰC SỰ tăng tốc được, không chỉ
+            # "hô khẩu hiệu" qua con số vx_max. Clip >=0 vì lùi (vận tốc
+            # âm) không nên được thưởng như đi nhanh.
+            reward_speed = 2.0 * max(0.0, float(info["linear_velocity"]))
+
+        # [GROUP2] Phạt action thay đổi ĐỘT NGỘT giữa 2 step liên tiếp —
+        # chuẩn hoá theo biên độ (ACTION_HIGH - ACTION_LOW) của TỪNG chiều
+        # trước khi tính, vì các chiều action có thang đo rất khác nhau
+        # (vx_max range ~0.95 so với goal_weight range ~20) — nếu không
+        # chuẩn hoá, phép phạt sẽ hoàn toàn bị chi phối bởi chiều có range
+        # lớn nhất, bỏ qua các chiều còn lại.
+        if self.previous_applied_action is not None:
+            action_range = self.ACTION_HIGH - self.ACTION_LOW
+            normalized_delta = (applied - self.previous_applied_action) / action_range
+            reward_smoothness = -self.ACTION_SMOOTHNESS_PENALTY_WEIGHT * float(
+                np.sum(normalized_delta ** 2)
+            )
+        else:
+            reward_smoothness = 0.0
+        self.previous_applied_action = applied.copy()
 
         nav_status = info["nav_status"]
         if not terminated and nav_status == GoalStatus.STATUS_SUCCEEDED:
@@ -976,6 +1083,7 @@ class AgvRlEnv(gym.Env):
             + reward_speed
             + reward_step
             + reward_goal
+            + reward_smoothness
         )
         self.previous_distance = distance
 
@@ -1010,6 +1118,7 @@ class AgvRlEnv(gym.Env):
                 "reward_progress": reward_progress,
                 "reward_safety": reward_safety,
                 "reward_speed": reward_speed,
+                "reward_smoothness": reward_smoothness,  # [GROUP2] để debug/log riêng
                 "reward_goal": reward_goal,
             }
         )
