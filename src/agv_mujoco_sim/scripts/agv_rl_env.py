@@ -635,6 +635,11 @@ class AgvRlEnv(gym.Env):
         max_episode_steps: int = 35,
     ) -> None:
         super().__init__()
+
+        # RNG độc lập chỉ dùng cho việc sinh random goal.
+        # Không chịu ảnh hưởng bởi seed của Gymnasium/SB3.
+        self._goal_rng = np.random.default_rng()
+
         # Giữ nguyên khung kiểm tra đối số gốc để tương thích với script ngoài
         if goal_sampling not in ("fixed", "cycle", "random"):
             raise ValueError(
@@ -725,8 +730,8 @@ class AgvRlEnv(gym.Env):
             max_global_attempts = self.max_goal_generation_attempts * 5
 
             for _ in range(max_global_attempts):
-                cand_x = float(self.np_random.uniform(origin_x, origin_x + width_m))
-                cand_y = float(self.np_random.uniform(origin_y, origin_y + height_m))
+                cand_x = float(self._goal_rng.uniform(origin_x, origin_x + width_m))
+                cand_y = float(self._goal_rng.uniform(origin_y, origin_y + height_m))
 
                 if math.hypot(cand_x - robot_x, cand_y - robot_y) < self.min_goal_distance:
                     continue
@@ -739,8 +744,8 @@ class AgvRlEnv(gym.Env):
         print("[Goal] Không tìm được điểm toàn map, dùng fallback bán kính xung quanh robot.")
         for r_max in (10.0, 6.0, 3.0, 1.5):
             for _ in range(self.max_goal_generation_attempts):
-                dx = float(self.np_random.uniform(-r_max, r_max))
-                dy = float(self.np_random.uniform(-r_max, r_max))
+                dx = float(self._goal_rng.uniform(-r_max, r_max))
+                dy = float(self._goal_rng.uniform(-r_max, r_max))
                 if math.hypot(dx, dy) < self.min_goal_distance:
                     continue
 
