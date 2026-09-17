@@ -76,3 +76,5 @@ log/
 # Python cache
 __pycache__/
 *.pyc
+*.pkl
+phase2_finetune_runs/**/*.zip

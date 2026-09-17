@@ -1,0 +1,51 @@
+{
+  "starting_timesteps": 375,
+  "final_timesteps": 868,
+  "additional_timesteps": 493,
+  "episodes": 14,
+  "termination_reasons": {
+    "max_steps": 13,
+    "collision": 1
+  },
+  "collision_events": 1,
+  "minimum_clearance_m": 0.2806834280490875,
+  "wall_seconds": 2534.0275108139995,
+  "interrupted": false,
+  "source_model": "/home/ubunturic/mujoco-agv-ws-main/install/agv_mujoco_sim/share/agv_mujoco_sim/transfer_models/sac_vmax_interrupted_model.zip",
+  "saved_model": "/home/ubunturic/mujoco-agv-ws-main/src/agv_mujoco_sim/scripts/phase2_finetune_runs/run_20260827_110730/final_model.zip",
+  "replay_buffer": "/home/ubunturic/mujoco-agv-ws-main/src/agv_mujoco_sim/scripts/phase2_finetune_runs/run_20260827_110730/latest_replay_buffer.pkl",
+  "replay_buffer_loaded": false,
+  "suite": "combined",
+  "goal_sampling": "cycle",
+  "seed": 42,
+  "learning_rate": 0.0001,
+  "contract": {
+    "observation_shape": [
+      26
+    ],
+    "action_shape": [
+      4
+    ],
+    "action_low": [
+      0.05000000074505806,
+      0.5,
+      5.0,
+      1.0
+    ],
+    "action_high": [
+      1.0,
+      15.0,
+      25.0,
+      15.0
+    ],
+    "probe_action": [
+      0.353634774684906,
+      11.96843147277832,
+      14.585912704467773,
+      8.473609924316406
+    ],
+    "num_timesteps": 375
+  },
+  "saved_sb3_version": "2.9.0",
+  "runtime_sb3_version": "2.9.0"
+}
