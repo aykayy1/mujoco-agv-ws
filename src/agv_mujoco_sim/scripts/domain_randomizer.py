@@ -35,6 +35,7 @@ class DomainRandomizer:
     GROUP_SPECS: Dict[str, Tuple[float, float, float]] = {
         # name: (nominal, absolute minimum, absolute maximum)
         "lidar_noise_std_m": (0.0, 0.0, 0.50),
+        "lidar_bias_m": (0.0, -0.50, 0.50),
         "lidar_dropout_probability": (0.0, 0.0, 1.0),
         "odom_linear_scale": (1.0, 0.50, 1.50),
         "odom_angular_scale": (1.0, 0.50, 1.50),
@@ -49,14 +50,19 @@ class DomainRandomizer:
         enabled: bool,
         seed: int,
         groups: Dict[str, ParameterGroup],
+        nominal_probability: float = 0.0,
     ) -> None:
         self.enabled = bool(enabled)
         self.seed = int(seed)
         self.groups = groups
+        self.nominal_probability = float(nominal_probability)
+        if not 0.0 <= self.nominal_probability <= 1.0:
+            raise ValueError("nominal_probability must be in [0, 1]")
         self.sensor_rng = np.random.default_rng(self.seed)
         self.last_state: Dict[str, Any] = {}
 
         self.lidar_noise_std_m = 0.0
+        self.lidar_bias_m = 0.0
         self.lidar_dropout_probability = 0.0
         self.odom_linear_scale = 1.0
         self.odom_angular_scale = 1.0
@@ -69,6 +75,9 @@ class DomainRandomizer:
     def declare_ros_parameters(cls, node: Any) -> None:
         node.declare_parameter("domain_randomization.enabled", False)
         node.declare_parameter("domain_randomization.seed", 42)
+        node.declare_parameter("domain_randomization.profile", "custom")
+        node.declare_parameter("domain_randomization.stage", "lidar")
+        node.declare_parameter("domain_randomization.nominal_probability", 0.2)
 
         for group_name, (nominal, _minimum, _maximum) in cls.GROUP_SPECS.items():
             prefix = f"domain_randomization.{group_name}"
@@ -93,12 +102,44 @@ class DomainRandomizer:
                 source=str(node.get_parameter(f"{prefix}.source").value),
             )
 
+        profile = str(node.get_parameter("domain_randomization.profile").value)
+        stage = str(node.get_parameter("domain_randomization.stage").value)
+        presets = {
+            "light": (0.01, 0.01, 0.005, 0.01, 0.010),
+            "medium": (0.02, 0.02, 0.01, 0.02, 0.025),
+            "strong": (0.03, 0.03, 0.03, 0.05, 0.050),
+        }
+        if stage not in ("lidar", "lidar_odom", "all"):
+            raise ValueError("stage must be lidar, lidar_odom or all")
+        if profile != "custom":
+            if profile not in presets:
+                raise ValueError("profile must be custom, light, medium or strong")
+            noise, bias, dropout, scale, latency = presets[profile]
+            ranges = {
+                "lidar_noise_std_m": (0.0, noise),
+                "lidar_bias_m": (-bias, bias),
+                "lidar_dropout_probability": (0.0, dropout),
+            }
+            if stage in ("lidar_odom", "all"):
+                ranges.update(odom_linear_scale=(1-scale, 1+scale),
+                              odom_angular_scale=(1-scale, 1+scale))
+            if stage == "all":
+                ranges["command_latency_s"] = (0.0, latency)
+            groups = {
+                name: ParameterGroup(name, name in ranges,
+                    *ranges.get(name, (spec[0], spec[0])), spec[0],
+                    "provisional", "unmeasured_training_prior:" + profile)
+                for name, spec in cls.GROUP_SPECS.items()
+            }
+
         return cls(
             enabled=bool(
                 node.get_parameter("domain_randomization.enabled").value
             ),
             seed=int(node.get_parameter("domain_randomization.seed").value),
             groups=groups,
+            nominal_probability=float(node.get_parameter(
+                "domain_randomization.nominal_probability").value),
         )
 
     def _validate_configuration(self) -> None:
@@ -143,8 +184,9 @@ class DomainRandomizer:
             np.random.SeedSequence([self.seed, int(generation), 0])
         )
         values: Dict[str, float] = {}
+        nominal_episode = episode_rng.random() < self.nominal_probability
         for name, group in self.groups.items():
-            if self.enabled and group.enabled:
+            if self.enabled and group.enabled and not nominal_episode:
                 values[name] = float(
                     episode_rng.uniform(group.low, group.high)
                 )
@@ -187,6 +229,8 @@ class DomainRandomizer:
             "generation": int(generation),
             "sim_time": float(sim_time),
             "behavior_randomized": behavior_randomized,
+            "nominal_episode": not behavior_randomized,
+            "nominal_probability": self.nominal_probability,
             # Kept for compatibility with Issue 03A diagnostics.
             "physics_randomized": False,
             "groups": groups_state,
@@ -212,8 +256,8 @@ class DomainRandomizer:
         randomized = np.asarray(ranges, dtype=np.float64).copy()
         valid = np.isfinite(randomized)
 
-        if self.lidar_noise_std_m > 0.0 and np.any(valid):
-            randomized[valid] += self.sensor_rng.normal(
+        if (self.lidar_noise_std_m > 0.0 or self.lidar_bias_m != 0.0) and np.any(valid):
+            randomized[valid] += self.lidar_bias_m + self.sensor_rng.normal(
                 0.0,
                 self.lidar_noise_std_m,
                 size=int(np.count_nonzero(valid)),

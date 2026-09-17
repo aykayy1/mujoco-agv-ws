@@ -1,4 +1,4 @@
-"""Start Nav2 plus the bounded SAC-to-MPPI speed supervisor."""
+"""Start Nav2 with an optional speed supervisor (disabled by default)."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -45,8 +45,11 @@ def generate_launch_description():
             DeclareLaunchArgument("log_level", default_value="info"),
             DeclareLaunchArgument(
                 "enable_rl_supervisor",
-                default_value="true",
-                description="Start the bounded SAC-to-MPPI speed adapter.",
+                default_value="false",
+                description=(
+                    "Opt in to the experimental 1D speed adapter. "
+                    "Keep disabled during AgvRlEnv 4D SAC training."
+                ),
             ),
             DeclareLaunchArgument(
                 "supervisor_params_file",

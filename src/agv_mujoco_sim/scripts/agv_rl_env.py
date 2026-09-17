@@ -9,6 +9,20 @@ Updated with:
 - Soft Reset on Truncation: Never reset to (0,0) unless there's a collision.
 - [PATCH] info["is_success"] now populated at episode end so SB3's
   ep_success_buffer / rollout/success_rate are no longer empty.
+- [PATCH] Hard reset after collision now RETRIES automatically instead of
+  crashing the whole training process if one ROS2 call times out.
+- [GROUP1] Observation nay la "egocentric": goal bearing tinh TUONG DOI so
+  voi huong mui robot (khong con tuyet doi theo truc X cua map), va co
+  them van toc that (linear + angular) tu /odometry/filtered. Observation
+  shape doi tu (26,) -> (28,) -> PHA VO checkpoint contract cu, BAT BUOC
+  train lai tu dau (da xac nhan voi nguoi dung, checkpoint hien tai moi
+  ~10k step nen chi phi doi bo rat thap).
+- [GROUP2] reward_speed doi tu dung applied[0] (tran vx_max RL vua DAT,
+  khong phan anh toc do THAT) sang dung state["linear_velocity"] do THAT
+  tu odometry -> loai bo ke ho "reward hacking" (agent hoc cach set tran
+  cao ma khong can robot thuc su di nhanh). Them reward_smoothness phat
+  action thay doi dot ngot giua 2 step lien tiep (chuan hoa theo bien do
+  moi chieu action, vi cac chieu co thang do rat khac nhau).
 """
 
 from __future__ import annotations
@@ -36,6 +50,7 @@ from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from robot_localization.srv import SetPose
+from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, Int32
 from std_srvs.srv import Trigger
@@ -58,7 +73,7 @@ def normalize_angle(angle: float) -> float:
 
 
 class AgvRosInterface(Node):
-    """ROS backend connecting the 26D/4D Gym contract to MuJoCo/Nav2."""
+    """ROS backend connecting the 28D/4D Gym contract to MuJoCo/Nav2."""
 
     LIDAR_BEAMS = 24
     LIDAR_ANGLE_MIN = -2.0943951
@@ -73,8 +88,10 @@ class AgvRosInterface(Node):
         self.lock = threading.RLock()
         self.scan_ready = threading.Event()
         self.odom_ready = threading.Event()
+        self.clock_ready = threading.Event()
         self.scan_seq = 0
         self.odom_seq = 0
+        self.sim_time = 0.0
         self.lidar = np.full(
             self.LIDAR_BEAMS,
             self.LIDAR_REPLACEMENT_RANGE,
@@ -87,6 +104,7 @@ class AgvRosInterface(Node):
         self.collision_event_count = 0
         self.max_contact_count = 0
         self.minimum_lidar_since_reset = self.LIDAR_REPLACEMENT_RANGE
+        self.minimum_lidar_since_step = self.LIDAR_REPLACEMENT_RANGE
 
         self.goal_handle = None
         self.goal_result_status: Optional[int] = None
@@ -143,6 +161,19 @@ class AgvRosInterface(Node):
             self._costmap_callback,
             costmap_qos,
         )
+        
+        clock_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+
+        self.create_subscription(
+            Clock,
+            "/clock",
+            self._clock_callback,
+            clock_qos,
+        )
         self.initial_pose_publisher = self.create_publisher(
             PoseWithCovarianceStamped,
             "/initialpose",
@@ -153,6 +184,8 @@ class AgvRosInterface(Node):
             Trigger,
             "/reset_simulation",
         )
+        self.randomization_client = self.create_client(
+            Trigger, "/resample_domain_randomization")
         self.set_ekf_pose_client = self.create_client(SetPose, "/set_pose")
         self.clear_global_costmap_client = self.create_client(
             ClearEntireCostmap,
@@ -212,6 +245,9 @@ class AgvRosInterface(Node):
                 self.minimum_lidar_since_reset,
                 float(np.min(reduced)),
             )
+            self.minimum_lidar_since_step = min(
+                self.minimum_lidar_since_step, float(np.min(reduced))
+            )
             self.scan_seq += 1
             self.scan_ready.set()
 
@@ -240,6 +276,54 @@ class AgvRosInterface(Node):
     def _costmap_callback(self, msg: OccupancyGrid) -> None:
         with self.lock:
             self.costmap = msg
+
+    def _clock_callback(self, msg: Clock) -> None:
+        stamp = msg.clock
+        sim_time = float(stamp.sec) + float(stamp.nanosec) * 1.0e-9
+        with self.lock:
+            self.sim_time = sim_time
+            self.clock_ready.set()
+
+    def current_sim_time(self) -> float:
+        with self.lock:
+            return float(self.sim_time)
+
+    def wait_for_sim_duration(
+        self,
+        duration: float,
+        stall_timeout: float = 5.0,
+    ) -> None:
+        """Wait for a duration measured by MuJoCo's monotonic /clock."""
+        if not math.isfinite(duration) or duration <= 0.0:
+            raise ValueError("Simulation duration must be finite and positive")
+        if not math.isfinite(stall_timeout) or stall_timeout <= 0.0:
+            raise ValueError("Clock stall timeout must be finite and positive")
+        if not self.clock_ready.wait(timeout=stall_timeout):
+            raise TimeoutError("No simulation time received on /clock")
+
+        start_sim_time = self.current_sim_time()
+        target_sim_time = start_sim_time + duration
+        latest_sim_time = start_sim_time
+        last_progress_wall_time = time.monotonic()
+
+        while rclpy.ok():
+            sim_time = self.current_sim_time()
+            if sim_time >= target_sim_time:
+                return
+            if sim_time < latest_sim_time:
+                raise RuntimeError(
+                    "/clock moved backwards during the action interval"
+                )
+            if sim_time > latest_sim_time:
+                latest_sim_time = sim_time
+                last_progress_wall_time = time.monotonic()
+            elif time.monotonic() - last_progress_wall_time >= stall_timeout:
+                raise TimeoutError(
+                    "/clock stopped advancing during the action interval"
+                )
+            time.sleep(0.005)
+
+        raise RuntimeError("ROS stopped during the action interval")
 
     def is_position_free(self, x: float, y: float) -> bool:
         """Check if position is free on the global costmap."""
@@ -273,8 +357,13 @@ class AgvRosInterface(Node):
                 "collision_event_count": int(self.collision_event_count),
                 "contact_count": int(self.max_contact_count),
                 "minimum_lidar": float(self.minimum_lidar_since_reset),
+                "minimum_lidar_step": float(self.minimum_lidar_since_step),
                 "nav_status": self.goal_result_status,
             }
+
+    def begin_action_interval(self) -> None:
+        with self.lock:
+            self.minimum_lidar_since_step = float(np.min(self.lidar))
 
     def reset_episode_flags(self) -> None:
         with self.lock:
@@ -283,6 +372,7 @@ class AgvRosInterface(Node):
             self.collision_event_count = 0
             self.max_contact_count = 0
             self.minimum_lidar_since_reset = self.LIDAR_REPLACEMENT_RANGE
+            self.minimum_lidar_since_step = self.LIDAR_REPLACEMENT_RANGE
             self.goal_result_status = None
 
     def get_map_pose(self) -> Tuple[float, float, float]:
@@ -316,6 +406,7 @@ class AgvRosInterface(Node):
     def wait_until_ready(self, timeout: float = 20.0) -> None:
         deadline = time.monotonic() + timeout
         clients = (
+            (self.randomization_client, "/resample_domain_randomization"),
             (self.reset_simulation_client, "/reset_simulation"),
             (self.set_ekf_pose_client, "/set_pose"),
             (
@@ -352,6 +443,9 @@ class AgvRosInterface(Node):
             raise RuntimeError(
                 "No filtered odometry received on /odometry/filtered"
             )
+        remaining = max(0.0, deadline - time.monotonic())
+        if not self.clock_ready.wait(timeout=remaining):
+            raise RuntimeError("No simulation time received on /clock")
 
     def cancel_navigation(self, timeout: float = 3.0) -> None:
         goal_handle = self.goal_handle
@@ -582,24 +676,57 @@ class AgvRlEnv(gym.Env):
     GOAL_REWARD = 100.0
     NAV_ABORT_REWARD = -30.0
 
+    # [GROUP1] Kích thước observation mới: 24 lidar + dist + bearing TƯƠNG
+    # ĐỐI + linear_velocity + angular_velocity = 28 (trước là 26).
+    OBSERVATION_DIM = 28
+    # [GROUP1] Hằng số chuẩn hoá vận tốc trong observation. Đặt cao hơn
+    # trần vật lý 1 chút (ACTION_HIGH[0]=1.0 cho vx_max, wz_max=0.8 trong
+    # nav2_mppi_params.yaml cho angular) để có biên độ dự phòng, tránh vượt
+    # quá [-1,1] khi robot vượt nhẹ trần do quán tính/overshoot tức thời.
+    MAX_EXPECTED_LINEAR_VELOCITY = 1.2
+    MAX_EXPECTED_ANGULAR_VELOCITY = 1.0
+
+    # [GROUP2] Trọng số phạt cho việc thay đổi action ĐỘT NGỘT giữa 2 step
+    # liên tiếp. Tính trên khoảng cách ĐÃ CHUẨN HOÁ theo biên độ mỗi chiều
+    # (ACTION_HIGH - ACTION_LOW), vì các chiều action có thang đo rất khác
+    # nhau (vx_max range ~0.95, goal_weight range ~20) — nếu không chuẩn
+    # hoá, chiều có range lớn sẽ áp đảo hoàn toàn phép phạt.
+    ACTION_SMOOTHNESS_PENALTY_WEIGHT = 0.1
+
     # [PATCH] Nếu True: chỉ tính episode là "thành công" khi đã tới >=1 goal
     # VÀ episode không kết thúc do va chạm. Nếu False: chỉ cần đã từng tới
     # goal là tính thành công (kể cả nếu sau đó va chạm). Xem giải thích ở
     # cuối phương thức step().
     SUCCESS_REQUIRES_NO_COLLISION = True
 
+    # [PATCH] Số lần thử lại tối đa cho quy trình hard reset sau va chạm,
+    # và thời gian chờ giữa các lần thử. Trước đây nếu BẤT KỲ bước nào
+    # (reset_simulation/reset_ekf/wait_for_reset_state...) timeout, lỗi sẽ
+    # bay thẳng lên và làm CRASH TOÀN BỘ script training - không hề quay
+    # lại (0,0,0) như mong đợi, mà dừng hẳn không chạy tiếp.
+    HARD_RESET_MAX_ATTEMPTS = 5
+    HARD_RESET_RETRY_DELAY = 2.0
+
     def __init__(
         self,
         goal: Goal = (9.5, 0.0, 0.0),
         goals: Optional[Sequence[Goal]] = None,
-        goal_sampling: str = "cycle",
+        goal_sampling: str = "random_costmap",
         max_episode_steps: int = 35,
     ) -> None:
         super().__init__()
+
+        # RNG độc lập chỉ dùng cho việc sinh random goal.
+        # Không chịu ảnh hưởng bởi seed của Gymnasium/SB3.
+        self._goal_rng = np.random.default_rng()
+
         # Giữ nguyên khung kiểm tra đối số gốc để tương thích với script ngoài
-        if goal_sampling not in ("fixed", "cycle", "random"):
+        # Legacy 'random' means random selection from the supplied list.
+        if goal_sampling == "random":
+            goal_sampling = "random_list"
+        if goal_sampling not in ("fixed", "cycle", "random_list", "random_costmap"):
             raise ValueError(
-                "goal_sampling must be fixed, cycle or random"
+                "goal_sampling must be fixed, cycle, random_list or random_costmap"
             )
         if max_episode_steps <= 0:
             raise ValueError("max_episode_steps must be positive")
@@ -636,6 +763,10 @@ class AgvRlEnv(gym.Env):
         self.previous_distance = 0.0
         self.closed = False
 
+        # [GROUP2] Action ĐÃ ÁP DỤNG ở step trước — dùng để tính phạt thay
+        # đổi đột ngột. None nghĩa là "chưa có step nào" (đầu episode).
+        self.previous_applied_action: Optional[np.ndarray] = None
+
         # Chỉ Reset Hard (về 0,0) ở lần chạy đầu tiên hoặc khi có va chạm
         self._needs_hard_reset = True
 
@@ -652,7 +783,7 @@ class AgvRlEnv(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(26,),
+            shape=(self.OBSERVATION_DIM,),
             dtype=np.float32,
         )
         try:
@@ -660,6 +791,19 @@ class AgvRlEnv(gym.Env):
         except Exception:
             self.close()
             raise
+
+    def _select_next_goal(self) -> None:
+        """Select a goal consistently on reset, success and abort."""
+        if self.goal_sampling == "random_costmap":
+            self._generate_new_goal()
+        elif self.goal_sampling == "fixed":
+            self.goal = self.goals[0]
+        elif self.goal_sampling == "cycle":
+            self.goal = self.goals[self.goal_cursor]
+            self.goal_cursor = (self.goal_cursor + 1) % len(self.goals)
+        else:  # random_list
+            index = int(self.np_random.integers(len(self.goals)))
+            self.goal = self.goals[index]
 
     def _generate_new_goal(self) -> None:
         """Sinh đích đến ngẫu nhiên trên toàn bản đồ, đảm bảo không chạm vật cản."""
@@ -682,8 +826,8 @@ class AgvRlEnv(gym.Env):
             max_global_attempts = self.max_goal_generation_attempts * 5
 
             for _ in range(max_global_attempts):
-                cand_x = float(self.np_random.uniform(origin_x, origin_x + width_m))
-                cand_y = float(self.np_random.uniform(origin_y, origin_y + height_m))
+                cand_x = float(self._goal_rng.uniform(origin_x, origin_x + width_m))
+                cand_y = float(self._goal_rng.uniform(origin_y, origin_y + height_m))
 
                 if math.hypot(cand_x - robot_x, cand_y - robot_y) < self.min_goal_distance:
                     continue
@@ -696,8 +840,8 @@ class AgvRlEnv(gym.Env):
         print("[Goal] Không tìm được điểm toàn map, dùng fallback bán kính xung quanh robot.")
         for r_max in (10.0, 6.0, 3.0, 1.5):
             for _ in range(self.max_goal_generation_attempts):
-                dx = float(self.np_random.uniform(-r_max, r_max))
-                dy = float(self.np_random.uniform(-r_max, r_max))
+                dx = float(self._goal_rng.uniform(-r_max, r_max))
+                dy = float(self._goal_rng.uniform(-r_max, r_max))
                 if math.hypot(dx, dy) < self.min_goal_distance:
                     continue
 
@@ -717,19 +861,53 @@ class AgvRlEnv(gym.Env):
         self.goal = (float(robot_x + self.min_goal_distance), float(robot_y), 0.0)
 
     def _pose_and_distance(self) -> Tuple[float, float, float, float]:
-        x, y, _yaw = self.ros.get_map_pose()
+        x, y, yaw = self.ros.get_map_pose()
         dx = self.goal[0] - x
         dy = self.goal[1] - y
-        return x, y, math.hypot(dx, dy), math.atan2(dy, dx)
+        distance = math.hypot(dx, dy)
+        global_bearing = math.atan2(dy, dx)
+        # [GROUP1] Đổi từ bearing TUYỆT ĐỐI (theo trục X của map) sang
+        # bearing TƯƠNG ĐỐI so với hướng mũi robot (yaw) — quan sát
+        # "egocentric" giúp policy tổng quát hoá tốt hơn nhiều: cùng 1
+        # tình huống hình học (goal ở bên trái/phải/phía trước robot) sẽ
+        # luôn cho ra cùng 1 giá trị quan sát, bất kể robot đang quay mặt
+        # hướng nào trên bản đồ tuyệt đối. Trước đây (bearing tuyệt đối),
+        # CÙNG một tình huống tương đối nhưng robot đứng quay hướng khác
+        # sẽ cho ra observation hoàn toàn khác nhau, buộc policy phải học
+        # lại quan hệ này riêng cho từng hướng quay có thể -> tốn dữ liệu
+        # hơn nhiều, khó tổng quát hoá.
+        relative_bearing = normalize_angle(global_bearing - yaw)
+        return x, y, distance, relative_bearing
 
     def _observation(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         state = self.ros.current_state()
-        x, y, distance, global_goal_bearing = self._pose_and_distance()
+        x, y, distance, relative_bearing = self._pose_and_distance()
         scan_normalized = np.clip(
             state["lidar"] / self.MAX_SCAN_RANGE,
             0.0,
             1.0,
         )
+
+        # [GROUP1] Thêm vận tốc thật (linear + angular) vào observation.
+        # Trước đây policy hoàn toàn "mù" về tốc độ hiện tại của chính nó —
+        # chỉ biết lidar + vị trí goal, không biết bản thân đang đi nhanh
+        # hay chậm. Thiếu thông tin này khiến policy khó học các quyết
+        # định phụ thuộc vào trạng thái động lực học hiện tại.
+        linear_velocity_norm = float(
+            np.clip(
+                state["linear_velocity"] / self.MAX_EXPECTED_LINEAR_VELOCITY,
+                -1.0,
+                1.0,
+            )
+        )
+        angular_velocity_norm = float(
+            np.clip(
+                state["angular_velocity"] / self.MAX_EXPECTED_ANGULAR_VELOCITY,
+                -1.0,
+                1.0,
+            )
+        )
+
         observation = np.concatenate(
             (
                 scan_normalized,
@@ -741,16 +919,18 @@ class AgvRlEnv(gym.Env):
                             1.0,
                         ),
                         np.clip(
-                            global_goal_bearing / math.pi,
+                            relative_bearing / math.pi,
                             -1.0,
                             1.0,
                         ),
+                        linear_velocity_norm,
+                        angular_velocity_norm,
                     ],
                     dtype=np.float32,
                 ),
             )
         ).astype(np.float32)
-        if observation.shape != (26,) or not np.all(
+        if observation.shape != (self.OBSERVATION_DIM,) or not np.all(
             np.isfinite(observation)
         ):
             raise RuntimeError(
@@ -761,9 +941,14 @@ class AgvRlEnv(gym.Env):
             "y": y,
             "goal": list(self.goal),
             "distance_to_goal": distance,
-            "global_goal_bearing": global_goal_bearing,
+            # [GROUP1] đổi tên field cho đúng bản chất (trước là
+            # global_goal_bearing, tuyệt đối theo map)
+            "relative_goal_bearing": relative_bearing,
+            "linear_velocity": state["linear_velocity"],
+            "angular_velocity": state["angular_velocity"],
             "min_lidar": float(np.min(state["lidar"])),
             "min_lidar_episode": float(state["minimum_lidar"]),
+            "min_lidar_step": float(state["minimum_lidar_step"]),
             "contact_count": int(state["contact_count"]),
             "collision_state": bool(state["collision"]),
             "collision_event_count": int(state["collision_event_count"]),
@@ -786,6 +971,55 @@ class AgvRlEnv(gym.Env):
         self.ros.set_mppi_parameters(*[float(value) for value in applied])
         return applied
 
+    def _perform_hard_reset(self) -> None:
+        """[PATCH] Thực hiện chuỗi hard-reset (về 0,0,0) với cơ chế thử lại.
+
+        Trước đây, nếu bất kỳ bước nào trong reset_simulation/reset_ekf/
+        reset_amcl/wait_for_reset_state bị timeout (rất dễ xảy ra khi CPU
+        tải cao hoặc MuJoCo/EKF chưa kịp ổn định), exception sẽ bay thẳng
+        lên trên và làm CRASH TOÀN BỘ script training - dừng hẳn, không hề
+        quay lại (0,0,0) như mong đợi. Giờ đây, nếu 1 lần thử thất bại, sẽ
+        tự động thử lại tối đa HARD_RESET_MAX_ATTEMPTS lần trước khi thực
+        sự báo lỗi.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, self.HARD_RESET_MAX_ATTEMPTS + 1):
+            try:
+                print(
+                    f"\n[Môi trường] Khởi tạo hoặc Va chạm: Dịch chuyển robot "
+                    f"về (0,0,0)... (lần thử {attempt}/{self.HARD_RESET_MAX_ATTEMPTS})"
+                )
+                self.ros.reset_simulation()
+                self.ros.reset_ekf()
+                self.ros.reset_amcl()
+                barrier = self.ros.current_state()
+                self.ros.wait_for_reset_state(
+                    old_scan_seq=barrier["scan_seq"],
+                    old_odom_seq=barrier["odom_seq"],
+                )
+                print(f"[Môi trường] Hard reset THÀNH CÔNG (lần thử {attempt}).")
+                return
+            except Exception as exc:  # noqa: BLE001 - cố tình bắt rộng để không crash
+                last_exc = exc
+                print(
+                    f"[Môi trường] Hard reset THẤT BẠI ở lần thử {attempt}: "
+                    f"{exc!r}"
+                )
+                if attempt < self.HARD_RESET_MAX_ATTEMPTS:
+                    print(
+                        f"[Môi trường] Chờ {self.HARD_RESET_RETRY_DELAY}s rồi "
+                        f"thử lại toàn bộ chuỗi reset..."
+                    )
+                    time.sleep(self.HARD_RESET_RETRY_DELAY)
+
+        # Hết số lần thử cho phép - lúc này mới thực sự báo lỗi, kèm thông
+        # tin rõ ràng để dễ chẩn đoán (thay vì traceback mơ hồ như trước).
+        raise RuntimeError(
+            f"Hard reset thất bại sau {self.HARD_RESET_MAX_ATTEMPTS} lần thử "
+            f"liên tiếp. Lỗi cuối cùng: {last_exc!r}. Kiểm tra lại ROS2/MuJoCo "
+            f"có đang chạy ổn định không (CPU quá tải, service không phản hồi...)."
+        ) from last_exc
+
     def reset(
         self,
         *,
@@ -797,47 +1031,78 @@ class AgvRlEnv(gym.Env):
         self.ros.cancel_navigation()
 
         if self._needs_hard_reset:
-            print("\n[Môi trường] Khởi tạo hoặc Va chạm: Dịch chuyển robot về (0,0)...")
-            self.ros.reset_simulation()
-            self.ros.reset_ekf()
-            self.ros.reset_amcl()
-            barrier = self.ros.current_state()
-            self.ros.wait_for_reset_state(
-                old_scan_seq=barrier["scan_seq"],
-                old_odom_seq=barrier["odom_seq"],
-            )
+            # [PATCH] Gọi qua hàm có retry thay vì gọi trực tiếp inline.
+            self._perform_hard_reset()
             self._needs_hard_reset = False
         else:
             print("\n[Môi trường] Hết giờ (Truncated): Giữ nguyên vị trí robot, chạy tiếp...")
             time.sleep(0.5)  # Đợi nhẹ 0.5s để cảm biến đồng bộ
 
+        # Resample only at stationary episode boundaries, never on goal reach.
+        deadline = time.monotonic() + 10.0
+        stable = 0
+        last_seq = -1
+        while time.monotonic() < deadline:
+            state = self.ros.current_state()
+            if state["odom_seq"] != last_seq:
+                last_seq = state["odom_seq"]
+                stopped = (abs(state["linear_velocity"]) < 0.02
+                           and abs(state["angular_velocity"]) < 0.03)
+                stable = stable + 1 if stopped else 0
+                if stable >= 3:
+                    break
+            time.sleep(0.01)
+        else:
+            raise TimeoutError("Robot did not stop before randomization")
+        future = self.ros.randomization_client.call_async(Trigger.Request())
+        response = self.ros._wait_future(future, 3.0, "domain randomization")
+        if not response.success:
+            raise RuntimeError(response.message)
+        # Wait for sensor samples generated with the new parameters.
+        barrier = self.ros.current_state()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            state = self.ros.current_state()
+            if (state["scan_seq"] >= barrier["scan_seq"] + 2
+                    and state["odom_seq"] >= barrier["odom_seq"] + 2):
+                break
+            time.sleep(0.01)
+        else:
+            raise TimeoutError("No fresh sensors after randomization")
         self.ros.reset_episode_flags()
         self.ros.clear_costmaps(timeout=10.0)
-        self._apply_action(self.SOURCE_NOMINAL_ACTION)
+        # [GROUP2] Lưu lại action nominal vừa áp dụng làm MỐC KHỞI ĐẦU cho
+        # phép tính phạt thay đổi đột ngột — để step() đầu tiên của episode
+        # vẫn được đánh giá đúng mức thay đổi so với trạng thái reset, thay
+        # vì bỏ qua hoàn toàn (previous_applied_action=None chỉ xảy ra ở
+        # episode/tiến trình đầu tiên trước reset() lần đầu).
+        self.previous_applied_action = self._apply_action(
+            self.SOURCE_NOMINAL_ACTION
+        ).copy()
 
-        # Luôn tự động random goal mới ngay khi reset
+        # Select according to the configured mode; default is whole-map sampling.
         self.goals_reached_this_episode = 0
-        self._generate_new_goal()
+        self._select_next_goal()
         self.ros.send_navigation_goal(*self.goal)
 
         observation, info = self._observation()
         self.previous_distance = float(info["distance_to_goal"])
         self.episode_step_count = 0
         info["reset_ok"] = True
+        info["domain_randomization"] = response.message
         return observation, info
 
     def step(self, action):
         self.episode_step_count += 1
+        self.ros.begin_action_interval()
         applied = self._apply_action(action)
-        deadline = time.monotonic() + self.STEP_WAIT_DURATION
-        while rclpy.ok() and time.monotonic() < deadline:
-            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
-        if not rclpy.ok():
-            raise RuntimeError("ROS stopped during the action interval")
+        self.ros.wait_for_sim_duration(self.STEP_WAIT_DURATION)
 
         observation, info = self._observation()
         distance = float(info["distance_to_goal"])
-        minimum_obstacle_distance = float(info["min_lidar"])
+        # Capture transient proximity within this action interval only.
+        # An old noisy reading must not penalize every subsequent step.
+        minimum_obstacle_distance = float(info["min_lidar_step"])
         progress = self.previous_distance - distance
 
         reward_progress = 15.0 * progress
@@ -851,11 +1116,24 @@ class AgvRlEnv(gym.Env):
 
         physical_collision = bool(info["collision_state"])
         lidar_collision = minimum_obstacle_distance < self.COLLISION_DISTANCE
-        if physical_collision or lidar_collision:
+        # Noisy LiDAR remains a proximity signal; physics decides termination.
+        contact_collision = int(info["contact_count"]) > 0
+        if physical_collision or contact_collision:
             reward_safety = self.COLLISION_REWARD
             terminated = True
             reason = "collision"
             self._needs_hard_reset = True  # CHỈ KHI NÀY MỚI BẬT CỜ RESET VỀ 0,0
+            # [PATCH] Log rõ nguồn nào phát hiện va chạm - hữu ích để debug
+            # xem /collision_state có đang publish đúng không, hay chỉ có
+            # lidar/contact_count bắt được.
+            print(
+                "💥 VA CHẠM PHÁT HIỆN BỞI: "
+                f"physical_collision={physical_collision}, "
+                f"lidar_collision={lidar_collision} "
+                f"(min={minimum_obstacle_distance:.3f}m), "
+                f"contact_collision={contact_collision} "
+                f"(contact_count={info['contact_count']})"
+            )
 
         elif minimum_obstacle_distance <= self.SAFE_DISTANCE:
             reward_safety = max(
@@ -868,29 +1146,78 @@ class AgvRlEnv(gym.Env):
                 self.SAFETY_REWARD_CLIP,
             )
         else:
-            reward_speed = 2.0 * float(applied[0])
+            # [GROUP2] Dùng VẬN TỐC THẬT đo được từ /odometry/filtered,
+            # KHÔNG dùng applied[0] (chỉ là TRẦN vx_max mà RL vừa đặt cho
+            # MPPI). Trước đây agent được thưởng ngay khi ĐẶT trần cao, bất
+            # kể robot có thực sự đạt tới tốc độ đó hay không — đây chính
+            # là kẽ hở "reward hacking" khớp với hiện tượng quan sát được:
+            # model luôn đẩy vx_max lên gần 1.0 (test bằng predict
+            # deterministic) nhưng tốc độ THẬT của robot chỉ loanh quanh
+            # 0.5 m/s. Đổi sang dùng vận tốc thật buộc agent phải học cách
+            # đặt tham số sao cho robot THỰC SỰ tăng tốc được, không chỉ
+            # "hô khẩu hiệu" qua con số vx_max. Clip >=0 vì lùi (vận tốc
+            # âm) không nên được thưởng như đi nhanh.
+            reward_speed = 2.0 * max(0.0, float(info["linear_velocity"]))
 
+        # [GROUP2] Phạt action thay đổi ĐỘT NGỘT giữa 2 step liên tiếp —
+        # chuẩn hoá theo biên độ (ACTION_HIGH - ACTION_LOW) của TỪNG chiều
+        # trước khi tính, vì các chiều action có thang đo rất khác nhau
+        # (vx_max range ~0.95 so với goal_weight range ~20) — nếu không
+        # chuẩn hoá, phép phạt sẽ hoàn toàn bị chi phối bởi chiều có range
+        # lớn nhất, bỏ qua các chiều còn lại.
+        if self.previous_applied_action is not None:
+            action_range = self.ACTION_HIGH - self.ACTION_LOW
+            normalized_delta = (applied - self.previous_applied_action) / action_range
+            reward_smoothness = -self.ACTION_SMOOTHNESS_PENALTY_WEIGHT * float(
+                np.sum(normalized_delta ** 2)
+            )
+        else:
+            reward_smoothness = 0.0
+        self.previous_applied_action = applied.copy()
+
+        # Rewards describe the action interval against the old goal. Keep
+        # that context separate from the next state after a goal handover.
         nav_status = info["nav_status"]
+        previous_goal = list(self.goal)
+        previous_goal_distance = distance
+        goal_event = None
         if not terminated and nav_status == GoalStatus.STATUS_SUCCEEDED:
             reward_goal = self.GOAL_REWARD
             self.goals_reached_this_episode += 1
             print(f"✅ ĐÃ TỚI ĐÍCH! (Tổng: {self.goals_reached_this_episode}) -> Đang sinh goal mới...")
 
-            self._generate_new_goal()
+            self._select_next_goal()
             self.ros.send_navigation_goal(*self.goal)
 
-            _, _, distance, _ = self._pose_and_distance()
+            goal_event = "succeeded"
             reason = "success_but_continue"
 
         elif not terminated and nav_status == GoalStatus.STATUS_ABORTED:
             reward_goal = self.NAV_ABORT_REWARD
             print("⚠️ NAV2 BỊ KẸT (ABORTED) -> Đang sinh goal mới...")
 
-            self._generate_new_goal()
+            self._select_next_goal()
             self.ros.send_navigation_goal(*self.goal)
 
-            _, _, distance, _ = self._pose_and_distance()
+            goal_event = "aborted"
             reason = "aborted_but_continue"
+
+        if goal_event is not None:
+            # SAC must choose its next action from the NEW goal, not the
+            # observation sampled before send_navigation_goal(). Refresh
+            # info as well so its goal/distance/count match that observation.
+            observation, info = self._observation()
+            distance = float(info["distance_to_goal"])
+
+        info.update(
+            {
+                "goal_event": goal_event,
+                "previous_goal": previous_goal,
+                "previous_goal_distance": previous_goal_distance,
+                "previous_goal_nav_status": nav_status,
+                "new_goal": list(self.goal) if goal_event is not None else None,
+            }
+        )
 
         if not terminated and self.episode_step_count >= self.max_episode_steps:
             truncated = True
@@ -902,6 +1229,7 @@ class AgvRlEnv(gym.Env):
             + reward_speed
             + reward_step
             + reward_goal
+            + reward_smoothness
         )
         self.previous_distance = distance
 
@@ -932,9 +1260,11 @@ class AgvRlEnv(gym.Env):
                 "applied_action": [float(value) for value in applied],
                 "physical_collision": physical_collision,
                 "lidar_collision": lidar_collision,
+                "contact_collision": contact_collision,  # [PATCH] để debug/log riêng nguồn này
                 "reward_progress": reward_progress,
                 "reward_safety": reward_safety,
                 "reward_speed": reward_speed,
+                "reward_smoothness": reward_smoothness,  # [GROUP2] để debug/log riêng
                 "reward_goal": reward_goal,
             }
         )
@@ -967,7 +1297,7 @@ GazeboMujocoTransferEnv = AgvRlEnv
 if __name__ == "__main__":
     environment = AgvRlEnv(
         goals=AgvRlEnv.COMBINED_GOALS,
-        goal_sampling="cycle",
+        goal_sampling="random_costmap",
         max_episode_steps=300,
     )
     try:

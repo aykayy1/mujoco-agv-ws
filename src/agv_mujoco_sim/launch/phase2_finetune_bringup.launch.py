@@ -48,7 +48,11 @@ def generate_launch_description():
             "model_file": "agv_spawn_transfer_arena.xml",
             "headless": headless,
             "real_time_factor": real_time_factor,
-            "domain_randomization": "false",
+            "domain_randomization": LaunchConfiguration("domain_randomization"),
+            "domain_randomization_seed": LaunchConfiguration("domain_randomization_seed"),
+            "dr_profile": LaunchConfiguration("dr_profile"),
+            "dr_stage": LaunchConfiguration("dr_stage"),
+            "dr_nominal_probability": LaunchConfiguration("dr_nominal_probability"),
         }.items(),
     )
     localization = IncludeLaunchDescription(
@@ -71,6 +75,11 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument("domain_randomization", default_value="false"),
+            DeclareLaunchArgument("domain_randomization_seed", default_value="42"),
+            DeclareLaunchArgument("dr_profile", default_value="light", choices=["light", "medium", "strong", "custom"]),
+            DeclareLaunchArgument("dr_stage", default_value="lidar", choices=["lidar", "lidar_odom", "all"]),
+            DeclareLaunchArgument("dr_nominal_probability", default_value="0.2"),
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("real_time_factor", default_value="1.0"),

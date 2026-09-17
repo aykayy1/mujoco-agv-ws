@@ -102,6 +102,9 @@ def generate_launch_description():
                     domain_randomization_seed,
                     value_type=int,
                 ),
+                "domain_randomization.profile": ParameterValue(LaunchConfiguration("dr_profile"), value_type=str),
+                "domain_randomization.stage": ParameterValue(LaunchConfiguration("dr_stage"), value_type=str),
+                "domain_randomization.nominal_probability": ParameterValue(LaunchConfiguration("dr_nominal_probability"), value_type=float),
             }
         ],
     )
@@ -115,6 +118,9 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument("dr_profile", default_value="light", choices=["light", "medium", "strong", "custom"]),
+        DeclareLaunchArgument("dr_stage", default_value="lidar", choices=["lidar", "lidar_odom", "all"]),
+        DeclareLaunchArgument("dr_nominal_probability", default_value="0.2"),
         DeclareLaunchArgument(
             "model_file",
             default_value="rl_trainingworld.xml",

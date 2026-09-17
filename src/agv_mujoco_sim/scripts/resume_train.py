@@ -18,6 +18,7 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 
 from agv_rl_env import AgvRlEnv
+from train_sac import validate_model, validate_replay_buffer_shape
 
 # Giữ nguyên giới hạn thread để tối ưu CPU
 torch.set_num_threads(2)
@@ -101,19 +102,24 @@ def main():
             f"KHÔNG nên resume thiếu buffer này vì SAC sẽ mất toàn bộ kinh nghiệm cũ."
         )
 
+    # Reject incompatible observations before creating the ROS environment.
+    model = SAC.load(str(model_path))
+    validate_model(model)
+    model.load_replay_buffer(str(buffer_path))
+    validate_replay_buffer_shape(model, model)
+
     # Khởi tạo môi trường AgvRlEnv (Khớp với train_sac.py)
     env = AgvRlEnv(
         goals=AgvRlEnv.COMBINED_GOALS,
-        goal_sampling="cycle",
+        goal_sampling="random_costmap",
         max_episode_steps=300,
     )
 
     # Load Model
-    model = SAC.load(str(model_path), env=env)
+    model.set_env(env)
     print(f"[resume] Đã load model — num_timesteps hiện tại: {model.num_timesteps:,}")
 
     # Load Buffer
-    model.load_replay_buffer(str(buffer_path))
     print(f"[resume] Đã load replay buffer — số mẫu hiện có: {model.replay_buffer.size():,}")
 
     steps_remaining = args.total_steps - model.num_timesteps

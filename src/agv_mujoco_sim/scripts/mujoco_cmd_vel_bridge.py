@@ -606,6 +606,9 @@ class MujocoRosBridge(Node):
         self.sim_right_joint_id = None
         self.reset_generation = 0
 
+        self.randomization_generation = 0
+        self.create_service(Trigger, "/resample_domain_randomization",
+                            self.resample_domain_randomization_callback)
         self.reset_simulation_service = self.create_service(
             Trigger,
             "/reset_simulation",
@@ -736,6 +739,26 @@ class MujocoRosBridge(Node):
         )
         self.domain_randomization_state_publisher.publish(message)
 
+    def resample_domain_randomization_callback(self, request, response):
+        """Called by Gym at a stationary episode boundary, without teleporting."""
+        del request
+        if not self.simulation_ready:
+            response.success = False
+            response.message = "MuJoCo is not ready"
+            return response
+        self.randomization_generation += 1
+        state = self.domain_randomizer.reset_episode(
+            generation=self.randomization_generation,
+            sim_time=self.current_sim_time)
+        # No pre-boundary command may survive with the old delay settings.
+        self.pending_commands.clear()
+        self.target_vx = self.target_wz = 0.0
+        self.received_cmd = False
+        self.publish_domain_randomization_state(state)
+        response.success = True
+        response.message = json.dumps(state)
+        return response
+
     def reset_simulation_callback(
         self,
         request: Trigger.Request,
@@ -771,10 +794,9 @@ class MujocoRosBridge(Node):
             data.time = preserved_sim_time
 
             next_generation = self.reset_generation + 1
-            domain_state = self.domain_randomizer.reset_episode(
-                generation=next_generation,
-                sim_time=preserved_sim_time,
-            )
+            # Randomization has its own episode service, independent of
+            # physical resets/collisions. Keep the current parameters here.
+            domain_state = self.domain_randomizer.last_state
 
             mujoco.mj_forward(model, data)
 
