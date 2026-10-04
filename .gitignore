@@ -57,6 +57,7 @@ frames_*.pdf
 # Training runtime outputs
 phase2_finetune_runs/
 test_results/
+benchmark_results/
 
 # Replay buffers and TensorBoard logs
 *.pkl

@@ -52,6 +52,21 @@ ros2 launch agv_mujoco_sim navigation.launch.py
 Before RL training, verify topic rates, the TF tree, forward LiDAR direction,
 wheel odometry, EKF, and AMCL using the real deployment map.
 
+## Measure the fixed-MPPI baseline
+
+Start MuJoCo, localization, and Nav2 without an RL policy, then measure how
+much of MPPI's configured `vx_max` is actually used on the clear straight
+from `(0, 0)` to `(9, 0)`:
+
+```bash
+ros2 run agv_mujoco_sim benchmark_mppi_baseline.py --trials 3
+```
+
+The command writes a JSON summary and per-sample CSV under
+`benchmark_results/`. `mean_cruise_speed_utilization >= 0.8` is the initial
+go criterion for testing an RL speed-limit-only policy. Lower utilization
+means the fixed MPPI baseline should be tuned and measured again first.
+
 ## Start Nav2 with the RL supervisor
 
 ```bash

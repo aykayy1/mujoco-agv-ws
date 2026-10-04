@@ -1672,6 +1672,7 @@ def main(args=None) -> int:
         f"viewer capped at {VIEWER_RATE:.1f} Hz wall time"
     )
 
+    return_code = 0
     try:
         viewer_context = nullcontext(None)
 

@@ -151,7 +151,9 @@ controller_server:
       time_steps: 40
       model_dt: 0.05
       batch_size: 1000
-      vx_std: 0.20
+      # A 0.20 sampling spread only used about 74% of vx_max on the clear
+      # benchmark. 0.30 reaches the configured ceiling without changing it.
+      vx_std: 0.30
       vy_std: 0.0
       wz_std: 0.40
       vx_max: 0.70

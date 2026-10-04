@@ -54,6 +54,7 @@ install(
 install(
   PROGRAMS
     scripts/agv_rl_env.py
+    scripts/benchmark_mppi_baseline.py
     scripts/train_sac.py
     scripts/check_runtime.py
     scripts/domain_randomizer.py
