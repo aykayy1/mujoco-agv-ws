@@ -67,6 +67,19 @@ The command writes a JSON summary and per-sample CSV under
 go criterion for testing an RL speed-limit-only policy. Lower utilization
 means the fixed MPPI baseline should be tuned and measured again first.
 
+Run the three-route decision suite (clear straight, upper obstacle detour,
+and lower zig-zag) before changing the RL interface:
+
+```bash
+ros2 run agv_mujoco_sim benchmark_mppi_baseline.py \
+  --suite decision --trials 3 --timeout-s 75
+```
+
+For a reproducible A/B test, `--vx-std-override VALUE` temporarily changes
+`FollowPath.vx_std` and restores its original value when the benchmark exits.
+The decision suite also reports all-sector and forward-sector clearance,
+near-obstacle speed, command variation, success, collision, and travel time.
+
 ## Start Nav2 with the RL supervisor
 
 ```bash
