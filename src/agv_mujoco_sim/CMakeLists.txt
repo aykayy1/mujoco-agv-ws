@@ -56,9 +56,7 @@ install(
     scripts/agv_rl_env.py
     scripts/train_sac.py
     scripts/check_runtime.py
-    scripts/measure_issue02_baseline.py
     scripts/domain_randomizer.py
-    scripts/measure_issue03_sampling.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

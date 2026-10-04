@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<mujoco model="agv_nav2_test_unexpected_obstacle">
+<mujoco model="agv_open_floor">
 
   <!--
     Robot geometry is based on the supplied CAD URDF/STL set.
@@ -94,8 +94,7 @@
       material="ground_material"
       friction="1.0 0.005 0.0001"/>
 
-    <!-- Active scenario. The other spawn files only change this include. -->
-    <include file="nav2_test_straight_environment.xml"/>
+    <!-- Open floor: scenario-specific obstacle files were intentionally removed. -->
 
     <!-- base_link starts 5 cm above its nominal settled height of 0.1 m. -->
     <body name="base_link" pos="0 0 0.15">

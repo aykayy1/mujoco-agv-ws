@@ -25,17 +25,17 @@ def generate_launch_description():
     navigation_launch = os.path.join(
         package_share,
         "launch",
-        "navigation.launch.py",
+        "navigation_rl.launch.py",
     )
     map_file = os.path.join(
         package_share,
         "maps",
-        "transfer_combined_arena.yaml",
+        "rl_trainingv2.yaml",
     )
     params_file = os.path.join(
         package_share,
         "config",
-        "nav2_gazebo_transfer_params.yaml",
+        "nav2_params.yaml",
     )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -45,7 +45,7 @@ def generate_launch_description():
     simulator = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(simulator_launch),
         launch_arguments={
-            "model_file": "agv_spawn_transfer_arena.xml",
+            "model_file": "rl_trainingworld.xml",
             "headless": headless,
             "real_time_factor": real_time_factor,
             "domain_randomization": LaunchConfiguration("domain_randomization"),

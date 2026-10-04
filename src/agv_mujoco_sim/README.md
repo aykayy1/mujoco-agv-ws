@@ -93,23 +93,11 @@ ros2 launch agv_mujoco_sim mujoco_sim.launch.py \
   headless:=true real_time_factor:=0.0
 ```
 
-Measure effective RTF, topic rates, and timestamp monotonicity:
+Inspect effective RTF and timestamp progression directly from `/clock`:
 
 ```bash
-ros2 run agv_mujoco_sim measure_issue02_baseline.py \
-  --duration-wall 15 \
-  --label headless_4x \
-  --output ~/issue02_headless_4x.json
-```
-
-Include a reset during the measurement:
-
-```bash
-ros2 run agv_mujoco_sim measure_issue02_baseline.py \
-  --duration-wall 15 \
-  --reset-at-wall 5 \
-  --label headless_4x_reset \
-  --output ~/issue02_headless_4x_reset.json
+ros2 topic hz /clock
+ros2 topic echo /clock --once
 ```
 
 `real_time_factor` must be finite and non-negative. A value of `0` means no
@@ -137,8 +125,8 @@ Pure-Python validation:
 python3 -m unittest discover -s test -p 'test_*.py'
 ```
 
-Runtime reset/diagnostic validation:
+Inspect the active domain-randomization state after launch:
 
 ```bash
-ros2 run agv_mujoco_sim measure_issue03_sampling.py --resets 3
+ros2 topic echo /domain_randomization/state --once
 ```

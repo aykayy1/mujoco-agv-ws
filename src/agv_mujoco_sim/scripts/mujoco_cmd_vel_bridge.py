@@ -40,7 +40,7 @@ from domain_randomizer import DomainRandomizer
 
 
 PACKAGE_NAME = "agv_mujoco_sim"
-MODEL_FILE = "agv_spawn_transfer_arena.xml"
+MODEL_FILE = "rl_trainingworld.xml"
 
 WHEEL_RADIUS = 0.1
 
