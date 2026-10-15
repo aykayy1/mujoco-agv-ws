@@ -1,0 +1,18 @@
+rl_velocity_supervisor:
+  ros__parameters:
+    # SAC-only ablation: no TTC estimation, no independent speed override.
+    safety_override_enabled: false
+    ttc_observation_enabled: false
+    controller_node: /controller_server
+    speed_limit_topic: /speed_limit
+    baseline_vx: 0.70
+    baseline_wz: 0.50
+    scale_min: 0.15
+    scale_max: 1.00
+    update_hz: 5.0
+    watchdog_timeout: 2.5
+    scale_slew_rate: 0.25
+    lowpass_alpha: 0.35
+    scale_fall_slew_rate: 0.25
+    fall_lowpass_alpha: 0.35
+    request_timeout: 1.0

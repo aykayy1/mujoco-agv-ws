@@ -45,10 +45,9 @@ def generate_launch_description():
             DeclareLaunchArgument("log_level", default_value="info"),
             DeclareLaunchArgument(
                 "enable_rl_supervisor",
-                default_value="false",
+                default_value="true",
                 description=(
-                    "Opt in to the experimental 1D speed adapter. "
-                    "Keep disabled during AgvRlEnv 4D SAC training."
+                    "Enable the 1D SpeedLimit adapter and TTC safety shield."
                 ),
             ),
             DeclareLaunchArgument(

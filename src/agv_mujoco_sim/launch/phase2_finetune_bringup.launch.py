@@ -27,11 +27,7 @@ def generate_launch_description():
         "launch",
         "navigation_rl.launch.py",
     )
-    map_file = os.path.join(
-        package_share,
-        "maps",
-        "rl_trainingv2.yaml",
-    )
+    default_map_file = os.path.join(package_share, "maps", "rl_trainingv2.yaml")
     params_file = os.path.join(
         package_share,
         "config",
@@ -41,13 +37,16 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     headless = LaunchConfiguration("headless")
     real_time_factor = LaunchConfiguration("real_time_factor")
+    enable_rl_supervisor = LaunchConfiguration("enable_rl_supervisor")
+    front_safety_stop_enabled = LaunchConfiguration("front_safety_stop_enabled")
 
     simulator = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(simulator_launch),
         launch_arguments={
-            "model_file": "rl_trainingworld.xml",
+            "model_file": LaunchConfiguration("model_file"),
             "headless": headless,
             "real_time_factor": real_time_factor,
+            "front_safety_stop_enabled": front_safety_stop_enabled,
             "domain_randomization": LaunchConfiguration("domain_randomization"),
             "domain_randomization_seed": LaunchConfiguration("domain_randomization_seed"),
             "dr_profile": LaunchConfiguration("dr_profile"),
@@ -58,7 +57,7 @@ def generate_launch_description():
     localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(localization_launch),
         launch_arguments={
-            "map": map_file,
+            "map": LaunchConfiguration("map_file"),
             "params_file": params_file,
             "use_sim_time": use_sim_time,
             "autostart": "true",
@@ -70,11 +69,15 @@ def generate_launch_description():
             "params_file": params_file,
             "use_sim_time": use_sim_time,
             "autostart": "true",
+            "enable_rl_supervisor": enable_rl_supervisor,
+            "supervisor_params_file": LaunchConfiguration("supervisor_params_file"),
         }.items(),
     )
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument("model_file", default_value="rl_trainingworld.xml"),
+            DeclareLaunchArgument("map_file", default_value=default_map_file),
             DeclareLaunchArgument("domain_randomization", default_value="false"),
             DeclareLaunchArgument("domain_randomization_seed", default_value="42"),
             DeclareLaunchArgument("dr_profile", default_value="light", choices=["light", "medium", "strong", "custom"]),
@@ -83,6 +86,23 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("real_time_factor", default_value="1.0"),
+            DeclareLaunchArgument(
+                "enable_rl_supervisor",
+                default_value="true",
+                description=(
+                    "Enable for 1D SAC training/deploy; disable for isolated "
+                    "MPPI/SpeedLimit benchmark arms."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "front_safety_stop_enabled",
+                default_value=enable_rl_supervisor,
+                description="Simulation-only last-resort stop; set false for SAC-only ablation.",
+            ),
+            DeclareLaunchArgument(
+                "supervisor_params_file",
+                default_value=os.path.join(package_share, "config", "rl_supervisor.yaml"),
+            ),
             simulator,
             TimerAction(period=2.0, actions=[localization]),
             TimerAction(period=4.0, actions=[navigation]),

@@ -114,6 +114,16 @@
         <geom name="cylinder_center" type="cylinder" pos="2.5 -4.5 0.5" size="0.4 0.5" material="mat_yellow"/>
     </body>
 
+    <!-- Runtime-controlled obstacle for dynamic-obstacle evaluation. It is
+         parked outside the arena and moved through /dynamic_obstacle/position. -->
+    <body name="dynamic_obstacle" mocap="true" pos="20 20 0.5">
+      <geom
+        name="dynamic_obstacle_collision"
+        type="cylinder"
+        size="0.45 0.5"
+        material="mat_red"/>
+    </body>
+
     <!-- ========================================== -->
     <!-- CẤU TRÚC ROBOT AGV ĐƯỢC NHÚNG TRỰC TIẾP LÀM GỐC -->
     <!-- ========================================== -->

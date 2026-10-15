@@ -233,18 +233,34 @@ def set_double_parameter(
         raise RuntimeError(f"Controller rejected {name}={value}: {reason}")
 
 
-def hard_reset(ros: AgvRosInterface) -> None:
+def hard_reset(ros: AgvRosInterface, attempts: int = 3) -> None:
     ros.cancel_navigation()
-    ros.reset_simulation()
-    ros.reset_ekf()
-    ros.reset_amcl()
-    barrier = ros.current_state()
-    ros.wait_for_reset_state(
-        old_scan_seq=barrier["scan_seq"],
-        old_odom_seq=barrier["odom_seq"],
-    )
-    ros.reset_episode_flags()
-    ros.clear_costmaps(timeout=10.0)
+    last_error: Optional[Exception] = None
+    for attempt in range(1, attempts + 1):
+        try:
+            ros.reset_simulation()
+            ros.reset_ekf()
+            ros.reset_amcl()
+            barrier = ros.current_state()
+            ros.wait_for_reset_state(
+                old_scan_seq=barrier["scan_seq"],
+                old_odom_seq=barrier["odom_seq"],
+            )
+            ros.reset_episode_flags()
+            ros.clear_costmaps(timeout=10.0)
+            return
+        except Exception as error:
+            last_error = error
+            if attempt < attempts:
+                print(
+                    f"[benchmark] Hard reset failed; retrying "
+                    f"({attempt}/{attempts}): {error}",
+                    flush=True,
+                )
+                time.sleep(0.25)
+    raise RuntimeError(
+        f"Hard reset failed after {attempts} attempts: {last_error}"
+    ) from last_error
 
 
 def wait_for_costmap(ros: AgvRosInterface, timeout: float = 5.0) -> None:
@@ -268,12 +284,13 @@ def mean_or_none(values: List[float]) -> Optional[float]:
 
 
 def forward_clearance(lidar: np.ndarray) -> float:
-    """Minimum range in the central +/-30 degree sector of 24 lidar bins."""
+    """Minimum range in the central +/-30 degrees of the forward 120-degree scan."""
     beam_count = int(lidar.size)
-    if beam_count < 6:
+    if beam_count < 4:
         return float(np.min(lidar))
     center = beam_count // 2
-    return float(np.min(lidar[center - 3:center + 3]))
+    half_width = beam_count // 4
+    return float(np.min(lidar[center - half_width:center + half_width]))
 
 
 def summarize_trial(
@@ -624,7 +641,7 @@ def main() -> int:
     all_samples: List[Dict[str, Any]] = []
     original_vx_std: Optional[float] = None
     try:
-        ros.wait_until_ready(timeout=30.0)
+        ros.wait_until_ready(timeout=30.0, require_supervisor=False)
         wait_for_costmap(ros)
         invalid_scenarios = [
             name for name, goal in scenarios

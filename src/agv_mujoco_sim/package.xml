@@ -50,6 +50,7 @@
        separately in requirements.txt because ROS package.xml cannot express
        their pip versions. -->
   <exec_depend>python3-numpy</exec_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
     <build_type>cmake</build_type>

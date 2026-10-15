@@ -1,0 +1,93 @@
+{
+  "starting_timesteps": 10000,
+  "final_timesteps": 20000,
+  "additional_timesteps": 10000,
+  "early_stopped": false,
+  "early_stop_reason": null,
+  "episodes": 78,
+  "termination_reasons": {
+    "collision": 40,
+    "max_steps": 38
+  },
+  "collision_events": 40,
+  "front_safety_stop_events": 0,
+  "front_safety_stop_reason_step_counts": {},
+  "front_safety_stop_reason_bits": {
+    "1": "missing or stale scan",
+    "2": "forward stopping corridor",
+    "4": "approaching edge hazard held after visibility loss",
+    "8": "invalid command"
+  },
+  "front_safety_stop_step_fraction": 0.0,
+  "collision_events_with_details": 40,
+  "collision_pair_counts": {
+    "base_collision_front<->dynamic_obstacle_collision": 36,
+    "right_wheel_collision<->dynamic_obstacle_collision": 2,
+    "left_wheel_collision<->dynamic_obstacle_collision": 1,
+    "base_collision_rear<->dynamic_obstacle_collision": 3
+  },
+  "goals_reached": 202,
+  "goals_reached_completed_episodes": 200,
+  "goals_reached_partial_episode": 2,
+  "front_stop_penalty_sum": 0.0,
+  "front_risk_penalty_sum": -291.8666200497098,
+  "front_risk_step_fraction": 0.1213,
+  "lateral_risk_penalty_sum": -31653.472135866472,
+  "lateral_risk_step_fraction": 0.6452,
+  "minimum_front_braking_margin_m": -0.9447511090058345,
+  "successful_episodes": 35,
+  "episode_success_rate": 0.44871794871794873,
+  "safety_override_step_fraction": 0.0,
+  "minimum_scale_step_fraction": 0.026,
+  "mean_requested_scale": 0.4889106599345803,
+  "mean_applied_scale": 0.48671474684774874,
+  "minimum_clearance_m": 0.15174371004104614,
+  "minimum_sector_ttc_s": 5.0,
+  "dynamic_obstacle_spawns": 308,
+  "dynamic_obstacle_episodes": 78,
+  "dynamic_obstacle_active_step_fraction": 0.1674,
+  "wall_seconds": 10430.727785332001,
+  "requested_additional_steps": 10000,
+  "trigger_transition_in_replay": null,
+  "replay_safe_to_resume": true,
+  "interrupted": false,
+  "training_error": null,
+  "source_model": "/home/anhkhoa/mujoco_agv_ws/runs/sac_only_no_ttc_10k_seed42/final_model.zip",
+  "saved_model": "/home/anhkhoa/mujoco_agv_ws/runs/sac_only_conservative_20k_seed42/final_model.zip",
+  "replay_buffer": "/home/anhkhoa/mujoco_agv_ws/runs/sac_only_conservative_20k_seed42/latest_replay_buffer.pkl",
+  "replay_buffer_loaded": false,
+  "suite": "combined",
+  "goal_sampling": "random_costmap",
+  "seed": 42,
+  "learning_rate": 0.0001,
+  "max_episode_steps": 180,
+  "dynamic_obstacles": true,
+  "sac_only": true,
+  "conservative_crossing": true,
+  "dynamic_obstacle_probability": 0.75,
+  "action_interval_seconds": 1.0,
+  "contract": {
+    "contract_version": "speedlimit-v5-front120-31x1-1hz-no-ttc",
+    "observation_shape": [
+      31
+    ],
+    "action_shape": [
+      1
+    ],
+    "action_low": [
+      0.15000000596046448
+    ],
+    "action_high": [
+      1.0
+    ],
+    "action_interval_seconds": 1.0,
+    "probe_action": [
+      0.9905544519424438
+    ],
+    "num_timesteps": 10000
+  },
+  "reward_contract_version": "front-lateral-sac-only-v1",
+  "saved_sb3_version": "2.7.1",
+  "runtime_sb3_version": "2.7.1",
+  "from_scratch": false
+}

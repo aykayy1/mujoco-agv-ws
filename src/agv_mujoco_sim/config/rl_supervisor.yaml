@@ -4,9 +4,9 @@ rl_velocity_supervisor:
     # authority over cmd_vel.
     controller_node: /controller_server
     speed_limit_topic: /speed_limit
-    baseline_vx: 0.40
+    baseline_vx: 0.70
     baseline_wz: 0.50
-    scale_min: 0.40
+    scale_min: 0.15
     scale_max: 1.00
 
     # SAC updates slowly; filtering and slew limits prevent abrupt MPPI limits.
@@ -15,3 +15,11 @@ rl_velocity_supervisor:
     scale_slew_rate: 0.25
     lowpass_alpha: 0.35
     request_timeout: 1.0
+
+    # Independent safety path. TTC/min-distance reductions bypass the RL
+    # low-pass and slew limiter; release returns to the smooth RL path.
+    emergency_ttc: 1.0
+    emergency_distance: 0.35
+    emergency_scale: 0.15
+    safety_hold_time: 0.75
+    min_closing_speed: 0.05

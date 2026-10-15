@@ -5,6 +5,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
+from nav2_common.launch import ReplaceString
 
 
 def generate_launch_description():
@@ -16,6 +17,17 @@ def generate_launch_description():
     )
     stock_navigation_launch = PathJoinSubstitution(
         [nav2_bringup_share, "launch", "navigation_launch.py"]
+    )
+    params_file = ReplaceString(
+        source_file=LaunchConfiguration("params_file"),
+        replacements={
+            "__AGV_NAV_TO_POSE_BT__": PathJoinSubstitution(
+                [package_share, "behavior_trees", "navigate_to_pose_front_only.xml"]
+            ),
+            "__AGV_NAV_THROUGH_POSES_BT__": PathJoinSubstitution(
+                [package_share, "behavior_trees", "navigate_through_poses_front_only.xml"]
+            ),
+        },
     )
 
     return LaunchDescription(
@@ -37,7 +49,7 @@ def generate_launch_description():
                     "namespace": LaunchConfiguration("namespace"),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
                     "autostart": LaunchConfiguration("autostart"),
-                    "params_file": LaunchConfiguration("params_file"),
+                    "params_file": params_file,
                     "use_composition": LaunchConfiguration("use_composition"),
                     "use_respawn": LaunchConfiguration("use_respawn"),
                     "log_level": LaunchConfiguration("log_level"),

@@ -21,12 +21,12 @@ from rclpy.qos import (
 
 from ament_index_python.packages import get_package_share_directory
 from builtin_interfaces.msg import Time as RosTime
-from geometry_msgs.msg import TransformStamped, Twist
+from geometry_msgs.msg import Point, TransformStamped, Twist
 from tf2_ros import TransformBroadcaster
 from nav_msgs.msg import Odometry
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Imu, JointState, LaserScan
-from std_msgs.msg import Bool, Int32, String
+from std_msgs.msg import Bool, Float32MultiArray, Int32, String
 from std_srvs.srv import Trigger
 
 try:
@@ -37,6 +37,7 @@ except ImportError as exc:
     raise SystemExit(1) from exc
 
 from domain_randomizer import DomainRandomizer
+from front_safety_stop import FrontSafetyStop
 
 
 PACKAGE_NAME = "agv_mujoco_sim"
@@ -81,6 +82,7 @@ IMU_ORIENTATION_SENSOR = "imu_orientation"
 LIDAR_RATE = 10.0
 LIDAR_FRAME = "lidar"
 LIDAR_SITE = "lidar_origin"
+DYNAMIC_OBSTACLE_BODY = "dynamic_obstacle"
 LIDAR_NUM_RAYS = 720
 LIDAR_ANGLE_MIN = -math.pi
 LIDAR_ANGLE_INCREMENT = math.radians(0.5)
@@ -89,8 +91,8 @@ LIDAR_RANGE_MAX = 12.0
 
 # Khớp filter đang chạy trên robot thật:
 #   LaserScanAngularBoundsFilterInPlace, -60...+60 độ.
-# /scan_raw vẫn là 720 mẫu toàn vòng. /scan giữ nguyên metadata và kích thước
-# 720 mẫu giống filter InPlace; các tia ngoài FOV 120 độ được thay bằng NaN.
+# Both /scan_raw and /scan keep 720 samples and their angular metadata.
+# Rays outside the real forward 120-degree field of view are NaN on both.
 # Với scan gốc -180...+179.5 độ, bước 0.5 độ, vùng hợp lệ là index
 # 240...480 (241 tia, gồm cả hai biên).
 LIDAR_FILTER_ANGLE_MIN = -math.pi / 3.0
@@ -455,12 +457,19 @@ class MujocoRosBridge(Node):
 
         self.declare_parameter("headless", False)
         self.declare_parameter("real_time_factor", 1.0)
+        self.declare_parameter("front_safety_stop_enabled", False)
         DomainRandomizer.declare_ros_parameters(self)
 
         self.headless = bool(self.get_parameter("headless").value)
         self.real_time_factor = float(
             self.get_parameter("real_time_factor").value
         )
+        self.front_safety_stop_enabled = bool(
+            self.get_parameter("front_safety_stop_enabled").value
+        )
+        self.front_safety_stop = FrontSafetyStop()
+        self.last_wheel_vx = 0.0
+        self.last_wheel_wz = 0.0
         self.model_file = str(
             self.get_parameter("model_file").value
         ).strip()
@@ -515,6 +524,18 @@ class MujocoRosBridge(Node):
             Twist,
             "/cmd_vel",
             self.cmd_vel_callback,
+            10,
+        )
+        self.front_safety_stop_publisher = self.create_publisher(
+            Bool, "/sim_front_safety_stop", 10,
+        )
+        self.front_safety_diagnostics_publisher = self.create_publisher(
+            Float32MultiArray, "/sim_front_safety_diagnostics", 10,
+        )
+        self.dynamic_obstacle_subscriber = self.create_subscription(
+            Point,
+            "/dynamic_obstacle/position",
+            self.dynamic_obstacle_position_callback,
             10,
         )
 
@@ -583,6 +604,11 @@ class MujocoRosBridge(Node):
             "/contact_count",
             10,
         )
+        self.collision_event_publisher = self.create_publisher(
+            String,
+            "/collision_event",
+            10,
+        )
 
         domain_state_qos = QoSProfile(
             depth=1,
@@ -602,6 +628,9 @@ class MujocoRosBridge(Node):
         self.sim_model = None
         self.sim_data = None
         self.initial_qpos = None
+        self.initial_mocap_pos = None
+        self.initial_mocap_quat = None
+        self.dynamic_obstacle_mocap_id = None
         self.sim_left_joint_id = None
         self.sim_right_joint_id = None
         self.reset_generation = 0
@@ -609,6 +638,11 @@ class MujocoRosBridge(Node):
         self.randomization_generation = 0
         self.create_service(Trigger, "/resample_domain_randomization",
                             self.resample_domain_randomization_callback)
+        self.create_service(
+            Trigger,
+            "/reset_domain_randomization_sequence",
+            self.reset_domain_randomization_sequence_callback,
+        )
         self.reset_simulation_service = self.create_service(
             Trigger,
             "/reset_simulation",
@@ -666,6 +700,7 @@ class MujocoRosBridge(Node):
         self.last_published_collision = False
 
         self.get_logger().info("Subscribe: /cmd_vel")
+        self.get_logger().info("Subscribe: /dynamic_obstacle/position")
         self.get_logger().info("Publish: /clock")
         self.get_logger().info("Publish: /joint_states")
         self.get_logger().info(
@@ -676,11 +711,11 @@ class MujocoRosBridge(Node):
         )
         self.get_logger().info("Publish: /imu")
         self.get_logger().info(
-            "Publish: /scan_raw (360 deg) and "
-            "/scan (InPlace -60...+60 deg)"
+            "Publish: /scan_raw and /scan (visible -60...+60 deg only)"
         )
         self.get_logger().info("Publish: /collision_state")
         self.get_logger().info("Publish: /contact_count")
+        self.get_logger().info("Publish: /collision_event")
         self.get_logger().info("Publish: /domain_randomization/state")
         self.get_logger().info("Service: /reset_simulation")
         pacing_label = (
@@ -711,6 +746,24 @@ class MujocoRosBridge(Node):
             data.qpos,
             dtype=np.float64,
         ).copy()
+        self.initial_mocap_pos = np.asarray(
+            data.mocap_pos,
+            dtype=np.float64,
+        ).copy()
+        self.initial_mocap_quat = np.asarray(
+            data.mocap_quat,
+            dtype=np.float64,
+        ).copy()
+        dynamic_body_id = mujoco.mj_name2id(
+            model,
+            mujoco.mjtObj.mjOBJ_BODY,
+            DYNAMIC_OBSTACLE_BODY,
+        )
+        if dynamic_body_id >= 0:
+            mocap_id = int(model.body_mocapid[dynamic_body_id])
+            self.dynamic_obstacle_mocap_id = (
+                mocap_id if mocap_id >= 0 else None
+            )
         self.sim_left_joint_id = int(left_joint_id)
         self.sim_right_joint_id = int(right_joint_id)
         self.update_sim_time(float(data.time))
@@ -759,6 +812,26 @@ class MujocoRosBridge(Node):
         response.message = json.dumps(state)
         return response
 
+    def reset_domain_randomization_sequence_callback(self, request, response):
+        """Reset deterministic episode sampling so controller arms can pair seeds."""
+        del request
+        if not self.simulation_ready:
+            response.success = False
+            response.message = "MuJoCo is not ready"
+            return response
+        self.randomization_generation = 0
+        state = self.domain_randomizer.reset_episode(
+            generation=0,
+            sim_time=self.current_sim_time,
+        )
+        self.pending_commands.clear()
+        self.target_vx = self.target_wz = 0.0
+        self.received_cmd = False
+        self.publish_domain_randomization_state(state)
+        response.success = True
+        response.message = json.dumps(state)
+        return response
+
     def reset_simulation_callback(
         self,
         request: Trigger.Request,
@@ -772,6 +845,8 @@ class MujocoRosBridge(Node):
             or self.sim_model is None
             or self.sim_data is None
             or self.initial_qpos is None
+            or self.initial_mocap_pos is None
+            or self.initial_mocap_quat is None
             or self.sim_left_joint_id is None
             or self.sim_right_joint_id is None
         ):
@@ -789,6 +864,8 @@ class MujocoRosBridge(Node):
             preserved_sim_time = float(data.time)
             mujoco.mj_resetData(model, data)
             data.qpos[:] = self.initial_qpos
+            data.mocap_pos[:] = self.initial_mocap_pos
+            data.mocap_quat[:] = self.initial_mocap_quat
             data.qvel[:] = 0.0
             data.ctrl[:] = 0.0
             data.time = preserved_sim_time
@@ -807,6 +884,9 @@ class MujocoRosBridge(Node):
             self.cmd_timeout_reported = False
             self.update_sim_time(preserved_sim_time)
             self.last_cmd_sim_time = preserved_sim_time
+            self.front_safety_stop.reset()
+            self.last_wheel_vx = 0.0
+            self.last_wheel_wz = 0.0
 
             self.collision_latched = False
             self.max_contact_count = 0
@@ -835,6 +915,25 @@ class MujocoRosBridge(Node):
             self.get_logger().error(response.message)
 
         return response
+
+    def dynamic_obstacle_position_callback(self, msg: Point) -> None:
+        """Move the evaluation obstacle without changing the static map."""
+        position = np.asarray([msg.x, msg.y, msg.z], dtype=np.float64)
+        if not np.all(np.isfinite(position)):
+            self.get_logger().error(
+                "Ignoring /dynamic_obstacle/position containing NaN or Inf"
+            )
+            return
+        if (
+            not self.simulation_ready
+            or self.sim_data is None
+            or self.dynamic_obstacle_mocap_id is None
+        ):
+            self.get_logger().warning(
+                "Ignoring dynamic obstacle command: mocap body is unavailable"
+            )
+            return
+        self.sim_data.mocap_pos[self.dynamic_obstacle_mocap_id] = position
 
     def cmd_vel_callback(self, msg: Twist) -> None:
         vx = float(msg.linear.x)
@@ -900,6 +999,42 @@ class MujocoRosBridge(Node):
         )
 
         if collision:
+            if not self.collision_latched and not self.last_published_collision:
+                base_id = mujoco.mj_name2id(
+                    model, mujoco.mjtObj.mjOBJ_BODY, "base_link"
+                )
+                position = data.xpos[base_id]
+                quaternion = data.xquat[base_id]
+                w, x, y, z = (float(value) for value in quaternion)
+                yaw = math.atan2(
+                    2.0 * (w * z + x * y),
+                    1.0 - 2.0 * (y * y + z * z),
+                )
+                obstacle_position = (
+                    data.mocap_pos[self.dynamic_obstacle_mocap_id]
+                    if self.dynamic_obstacle_mocap_id is not None
+                    else None
+                )
+                event = {
+                    "sim_time_s": float(data.time),
+                    "contact_pairs": [
+                        {"robot_geom": robot, "environment_geom": environment}
+                        for robot, environment in contact_pairs
+                    ],
+                    "robot_world_pose": {
+                        "x": float(position[0]),
+                        "y": float(position[1]),
+                        "z": float(position[2]),
+                        "yaw_rad": yaw,
+                    },
+                    "dynamic_obstacle_world_position": (
+                        [float(value) for value in obstacle_position]
+                        if obstacle_position is not None else None
+                    ),
+                }
+                self.collision_event_publisher.publish(
+                    String(data=json.dumps(event, ensure_ascii=False))
+                )
             self.collision_latched = True
             self.max_contact_count = max(
                 self.max_contact_count,
@@ -1085,11 +1220,13 @@ class MujocoRosBridge(Node):
         msg.pose.covariance = create_wheel_pose_covariance()
 
         msg.twist.twist.linear.x = delta_distance / delta_time
+        self.last_wheel_vx = float(msg.twist.twist.linear.x)
         msg.twist.twist.linear.y = 0.0
         msg.twist.twist.linear.z = 0.0
         msg.twist.twist.angular.x = 0.0
         msg.twist.twist.angular.y = 0.0
         msg.twist.twist.angular.z = delta_yaw / delta_time
+        self.last_wheel_wz = float(msg.twist.twist.angular.z)
         msg.twist.covariance = create_wheel_twist_covariance()
 
         self.wheel_odom_publisher.publish(msg)
@@ -1227,6 +1364,9 @@ class MujocoRosBridge(Node):
                 LIDAR_ANGLE_MIN
                 + ray_index * LIDAR_ANGLE_INCREMENT
             )
+            if not LIDAR_FILTER_START_INDEX <= ray_index <= LIDAR_FILTER_END_INDEX:
+                raw_ranges.append(float("nan"))
+                continue
 
             direction_lidar = np.array(
                 [math.cos(angle), math.sin(angle), 0.0],
@@ -1310,9 +1450,7 @@ class MujocoRosBridge(Node):
         raw_msg.intensities = []
         self.raw_scan_publisher.publish(raw_msg)
 
-        # Mô phỏng đúng LaserScanAngularBoundsFilterInPlace trên robot thật:
-        # giữ nguyên 720 phần tử và metadata scan gốc; các tia ngoài
-        # -60...+60 độ được đánh dấu NaN.
+        # Keep /scan aligned with the same physically visible forward rays.
         filtered_ranges = [float("nan")] * LIDAR_NUM_RAYS
         filtered_ranges[
             LIDAR_FILTER_START_INDEX:LIDAR_FILTER_END_INDEX + 1
@@ -1339,6 +1477,17 @@ class MujocoRosBridge(Node):
         msg.intensities = []
 
         self.scan_publisher.publish(msg)
+        if self.front_safety_stop_enabled:
+            self.front_safety_stop.update_scan(
+                msg.ranges,
+                angle_min=msg.angle_min,
+                angle_increment=msg.angle_increment,
+                range_min=msg.range_min,
+                range_max=msg.range_max,
+                sim_time_s=self.current_sim_time,
+                ego_vx_m_s=self.last_wheel_vx,
+                ego_wz_rad_s=self.last_wheel_wz,
+            )
 
     def broadcast_odom_transform(
         self,
@@ -1726,6 +1875,29 @@ def main(args=None) -> int:
                 # 20 Hz simulation time and hold it between two updates.
                 if step_count % motor_step_interval == 0:
                     vx, wz = node.get_command()
+                    if node.front_safety_stop_enabled:
+                        vx, wz = node.front_safety_stop.limit_command(
+                            vx, wz,
+                            measured_vx=node.last_wheel_vx,
+                            sim_time_s=node.current_sim_time,
+                        )
+                        node.front_safety_stop_publisher.publish(
+                            Bool(data=node.front_safety_stop.active)
+                        )
+                        diagnostics = Float32MultiArray()
+                        diagnostics.data = [
+                            float(node.front_safety_stop.active),
+                            float(node.front_safety_stop.clearance_observed_m),
+                            float(node.front_safety_stop.stop_distance_m),
+                            float(node.front_safety_stop.corridor_half_width_current_m),
+                            float(max(
+                                0.0,
+                                node.front_safety_stop.edge_hold_until_s
+                                - node.current_sim_time,
+                            )),
+                            float(node.front_safety_stop.stop_reason),
+                        ]
+                        node.front_safety_diagnostics_publisher.publish(diagnostics)
                     omega_left, omega_right = (
                         cmd_vel_to_wheels(vx, wz)
                     )

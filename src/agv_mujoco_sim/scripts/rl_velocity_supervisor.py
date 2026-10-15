@@ -5,14 +5,14 @@ The node accepts one value on ``/rl_velocity_limits``:
 
     [speed_scale]
 
-``speed_scale`` is clamped to [0.40, 1.00].  It is published to the Nav2
+``speed_scale`` is clamped to [0.15, 1.00].  It is published to the Nav2
 Controller Server through ``nav2_msgs/msg/SpeedLimit`` in percentage mode.
 Nav2 Humble MPPI applies that one ratio to all velocity constraints, so with
-the verified base limits vx_max=0.40 m/s and wz_max=0.50 rad/s the effective
+the verified base limits vx_max=0.70 m/s and wz_max=0.50 rad/s the effective
 range is:
 
-    vx_max: 0.16 .. 0.40 m/s
-    wz_max: 0.20 .. 0.50 rad/s
+    vx_max: 0.105 .. 0.70 m/s
+    wz_max: 0.075 .. 0.50 rad/s
 
 This path calls MPPI's setSpeedLimit() API and therefore does not invoke the
 dynamic-parameter callback that resets the optimizer.
@@ -20,13 +20,18 @@ dynamic-parameter callback that resets the optimizer.
 
 import math
 import time
+from collections import deque
 
+import numpy as np
 import rclpy
 from nav2_msgs.msg import SpeedLimit
 from rcl_interfaces.msg import ParameterType, SetParametersResult
 from rcl_interfaces.srv import GetParameters
 from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32MultiArray
 
 
@@ -39,6 +44,11 @@ class RlVelocitySupervisor(Node):
     VERIFY_PERIOD = 0.5
     SERVICE_RETRY_DELAY = 0.5
     VALUE_EPSILON = 1.0e-4
+    TTC_SECTORS = 24
+    TTC_LOOKBACK_SECONDS = 0.35
+    TTC_HISTORY_SECONDS = 0.85
+    TTC_CONFIRM_SCANS = 3
+    TTC_MAX_CLOSING_SPEED = 3.0
 
     MUTABLE_LOCAL_PARAMETERS = {
         "baseline_vx",
@@ -48,7 +58,14 @@ class RlVelocitySupervisor(Node):
         "watchdog_timeout",
         "scale_slew_rate",
         "lowpass_alpha",
+        "scale_fall_slew_rate",
+        "fall_lowpass_alpha",
         "request_timeout",
+        "emergency_ttc",
+        "emergency_distance",
+        "emergency_scale",
+        "safety_hold_time",
+        "min_closing_speed",
     }
 
     def __init__(self):
@@ -67,6 +84,14 @@ class RlVelocitySupervisor(Node):
         self.last_apply_time = self._control_time()
         self.last_rl_message = None
         self.watchdog_active = True
+        self.safety_active = False
+        self.safety_release_after = 0.0
+        self.safety_min_ttc = math.inf
+        self.safety_sector_ttc = np.full(self.TTC_SECTORS, 5.0, dtype=np.float32)
+        self.scan_history = deque(maxlen=16)
+        self.last_scan_time = None
+        self.ttc_candidate_scans = 0
+        self.latest_yaw = None
 
         self.controller_verified = False
         self.verification_future = None
@@ -88,16 +113,38 @@ class RlVelocitySupervisor(Node):
             self.speed_limit_topic,
             10,
         )
+        status_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
         self.applied_status_publisher = self.create_publisher(
             Float32MultiArray,
             "/rl_velocity_limits_applied",
-            10,
+            status_qos,
         )
         self.subscription = self.create_subscription(
             Float32MultiArray,
             "/rl_velocity_limits",
             self.rl_callback,
             10,
+        )
+        sensor_qos = QoSProfile(
+            depth=5,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+        self.scan_subscription = self.create_subscription(
+            LaserScan,
+            "/scan",
+            self.scan_callback,
+            sensor_qos,
+        )
+        self.odom_subscription = self.create_subscription(
+            Odometry,
+            "/odometry/filtered",
+            self.odom_callback,
+            sensor_qos,
         )
 
         self.local_parameter_callback_handle = (
@@ -123,15 +170,24 @@ class RlVelocitySupervisor(Node):
     def _declare_local_parameters(self):
         self.declare_parameter("controller_node", "/controller_server")
         self.declare_parameter("speed_limit_topic", "/speed_limit")
-        self.declare_parameter("baseline_vx", 0.40)
+        self.declare_parameter("baseline_vx", 0.70)
         self.declare_parameter("baseline_wz", 0.50)
-        self.declare_parameter("scale_min", 0.40)
+        self.declare_parameter("scale_min", 0.15)
         self.declare_parameter("scale_max", 1.00)
         self.declare_parameter("update_hz", 5.0)
         self.declare_parameter("watchdog_timeout", 2.5)
         self.declare_parameter("scale_slew_rate", 0.25)
         self.declare_parameter("lowpass_alpha", 0.35)
+        self.declare_parameter("scale_fall_slew_rate", 0.25)
+        self.declare_parameter("fall_lowpass_alpha", 0.35)
         self.declare_parameter("request_timeout", 1.0)
+        self.declare_parameter("safety_override_enabled", True)
+        self.declare_parameter("ttc_observation_enabled", True)
+        self.declare_parameter("emergency_ttc", 1.0)
+        self.declare_parameter("emergency_distance", 0.35)
+        self.declare_parameter("emergency_scale", 0.15)
+        self.declare_parameter("safety_hold_time", 0.75)
+        self.declare_parameter("min_closing_speed", 0.05)
 
     def _load_local_parameters(self):
         controller_node = str(
@@ -176,8 +232,33 @@ class RlVelocitySupervisor(Node):
         self.lowpass_alpha = float(
             self.get_parameter("lowpass_alpha").value
         )
+        self.scale_fall_slew_rate = float(
+            self.get_parameter("scale_fall_slew_rate").value
+        )
+        self.fall_lowpass_alpha = float(
+            self.get_parameter("fall_lowpass_alpha").value
+        )
         self.request_timeout = float(
             self.get_parameter("request_timeout").value
+        )
+        self.safety_override_enabled = bool(
+            self.get_parameter("safety_override_enabled").value
+        )
+        self.ttc_observation_enabled = bool(
+            self.get_parameter("ttc_observation_enabled").value
+        )
+        self.emergency_ttc = float(self.get_parameter("emergency_ttc").value)
+        self.emergency_distance = float(
+            self.get_parameter("emergency_distance").value
+        )
+        self.emergency_scale = float(
+            self.get_parameter("emergency_scale").value
+        )
+        self.safety_hold_time = float(
+            self.get_parameter("safety_hold_time").value
+        )
+        self.min_closing_speed = float(
+            self.get_parameter("min_closing_speed").value
         )
 
     def _config_as_dict(self):
@@ -190,7 +271,14 @@ class RlVelocitySupervisor(Node):
             "watchdog_timeout": self.watchdog_timeout,
             "scale_slew_rate": self.scale_slew_rate,
             "lowpass_alpha": self.lowpass_alpha,
+            "scale_fall_slew_rate": self.scale_fall_slew_rate,
+            "fall_lowpass_alpha": self.fall_lowpass_alpha,
             "request_timeout": self.request_timeout,
+            "emergency_ttc": self.emergency_ttc,
+            "emergency_distance": self.emergency_distance,
+            "emergency_scale": self.emergency_scale,
+            "safety_hold_time": self.safety_hold_time,
+            "min_closing_speed": self.min_closing_speed,
         }
 
     @staticmethod
@@ -215,8 +303,22 @@ class RlVelocitySupervisor(Node):
             return "scale_slew_rate must be > 0"
         if not 0.0 < config["lowpass_alpha"] <= 1.0:
             return "lowpass_alpha must be in (0, 1]"
+        if config["scale_fall_slew_rate"] <= 0.0:
+            return "scale_fall_slew_rate must be > 0"
+        if not 0.0 < config["fall_lowpass_alpha"] <= 1.0:
+            return "fall_lowpass_alpha must be in (0, 1]"
         if config["request_timeout"] <= 0.0:
             return "request_timeout must be > 0"
+        if config["emergency_ttc"] <= 0.0:
+            return "emergency_ttc must be > 0"
+        if config["emergency_distance"] <= 0.0:
+            return "emergency_distance must be > 0"
+        if not config["scale_min"] <= config["emergency_scale"] <= config["scale_max"]:
+            return "emergency_scale must be inside the configured scale range"
+        if config["safety_hold_time"] < 0.0:
+            return "safety_hold_time must be >= 0"
+        if config["min_closing_speed"] <= 0.0:
+            return "min_closing_speed must be > 0"
         return ""
 
     def local_parameter_callback(self, parameters):
@@ -228,6 +330,8 @@ class RlVelocitySupervisor(Node):
                 "controller_node",
                 "speed_limit_topic",
                 "update_hz",
+                "safety_override_enabled",
+                "ttc_observation_enabled",
             ):
                 return SetParametersResult(
                     successful=False,
@@ -278,6 +382,15 @@ class RlVelocitySupervisor(Node):
         if abs(error) <= max_step:
             return target
         return current + math.copysign(max_step, error)
+
+    @staticmethod
+    def smoothed_scale_step(current, target, dt, rise_rate, rise_alpha,
+                            fall_rate, fall_alpha):
+        falling = target < current
+        alpha = fall_alpha if falling else rise_alpha
+        rate = fall_rate if falling else rise_rate
+        filtered = current + alpha * (target - current)
+        return RlVelocitySupervisor.move_towards(current, filtered, rate * dt)
 
     def _control_time(self):
         """ROS time in simulation and system time on the real robot."""
@@ -431,11 +544,177 @@ class RlVelocitySupervisor(Node):
             )
         self.watchdog_active = False
 
+    def odom_callback(self, msg):
+        q = msg.pose.pose.orientation
+        self.latest_yaw = math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z),
+        )
+
+    @classmethod
+    def _sector_ranges(cls, ranges):
+        sectors = np.full(cls.TTC_SECTORS, np.inf, dtype=np.float32)
+        for index, rays in enumerate(np.array_split(ranges, cls.TTC_SECTORS)):
+            finite = rays[np.isfinite(rays)]
+            if finite.size >= 3:
+                sectors[index] = float(np.quantile(finite, 0.2))
+        return sectors
+
+    @staticmethod
+    def _align_previous_scan(previous, angle_increment, yaw_delta):
+        """Compare rays aimed at the same world bearing during robot turns."""
+        indices = np.arange(previous.size, dtype=np.float64)
+        shifted = indices + yaw_delta / angle_increment
+        left = np.floor(shifted).astype(np.int64)
+        right = left + 1
+        valid = (left >= 0) & (right < previous.size)
+        aligned = np.full(previous.shape, np.inf, dtype=np.float32)
+        if not np.any(valid):
+            return aligned
+        output_indices = np.flatnonzero(valid)
+        left_values = previous[left[valid]]
+        right_values = previous[right[valid]]
+        finite = np.isfinite(left_values) & np.isfinite(right_values)
+        fraction = shifted[valid][finite] - left[valid][finite]
+        aligned[output_indices[finite]] = (
+            (1.0 - fraction) * left_values[finite]
+            + fraction * right_values[finite]
+        )
+        return aligned
+
+    def scan_callback(self, msg):
+        """Estimate TTC for observations; optionally apply an independent shield."""
+        if not self.ttc_observation_enabled:
+            return
+        ranges = np.asarray(msg.ranges, dtype=np.float32)
+        if ranges.size == 0:
+            return
+        angles = (
+            float(msg.angle_min)
+            + np.arange(ranges.size) * float(msg.angle_increment)
+        )
+        front = (
+            (angles >= -math.pi / 3.0 - 1.0e-5)
+            & (angles <= math.pi / 3.0 + 1.0e-5)
+        )
+        # NaN is an unobserved/masked ray; +Inf is a valid no-return ray.
+        observed = front & (
+            np.isposinf(ranges)
+            | (np.isfinite(ranges) & (ranges > 0.0))
+        )
+        valid = observed & np.isfinite(ranges) & (ranges > 0.0)
+        current = np.where(valid, ranges, np.inf)
+        stamp = msg.header.stamp
+        scan_time = float(stamp.sec) + float(stamp.nanosec) * 1.0e-9
+        if scan_time <= 0.0:
+            scan_time = self._control_time()
+
+        min_range = float(np.min(current))
+        min_ttc = math.inf
+        if self.last_scan_time is not None and (
+            scan_time <= self.last_scan_time
+            or scan_time - self.last_scan_time > self.TTC_HISTORY_SECONDS
+        ):
+            self.scan_history.clear()
+            self.ttc_candidate_scans = 0
+        self.last_scan_time = scan_time
+
+        front_ranges = current[front]
+        sectors = self._sector_ranges(front_ranges)
+
+        while self.scan_history and (
+            scan_time - self.scan_history[0][0] > self.TTC_HISTORY_SECONDS
+        ):
+            self.scan_history.popleft()
+        reference = next(
+            (
+                (old_time, old_ranges, old_yaw)
+                for old_time, old_ranges, old_yaw in reversed(self.scan_history)
+                if scan_time - old_time >= self.TTC_LOOKBACK_SECONDS
+            ),
+            None,
+        )
+        sector_ttc = np.full(self.TTC_SECTORS, np.inf, dtype=np.float32)
+        if reference is not None and self.latest_yaw is not None:
+            old_time, old_ranges, old_yaw = reference
+            dt = scan_time - old_time
+            if old_yaw is not None and front_ranges.shape == old_ranges.shape:
+                yaw_delta = math.atan2(
+                    math.sin(self.latest_yaw - old_yaw),
+                    math.cos(self.latest_yaw - old_yaw),
+                )
+                if abs(yaw_delta) <= 0.5:
+                    aligned_old_ranges = self._align_previous_scan(
+                        old_ranges, float(msg.angle_increment), yaw_delta
+                    )
+                    old_sectors = self._sector_ranges(aligned_old_ranges)
+                    finite_pair = np.isfinite(sectors) & np.isfinite(old_sectors)
+                    closing_speed = np.zeros_like(sectors)
+                    np.subtract(
+                        old_sectors, sectors, out=closing_speed,
+                        where=finite_pair,
+                    )
+                    closing_speed /= dt
+                    closing = (
+                        finite_pair
+                        & (closing_speed > self.min_closing_speed)
+                        & (closing_speed <= self.TTC_MAX_CLOSING_SPEED)
+                    )
+                    if np.any(closing):
+                        sector_ttc[closing] = sectors[closing] / closing_speed[closing]
+                        min_ttc = float(np.min(sector_ttc))
+        self.scan_history.append((scan_time, front_ranges.copy(), self.latest_yaw))
+
+        hazardous_sectors = sector_ttc <= self.emergency_ttc
+        spatially_supported = bool(
+            np.any(hazardous_sectors[:-1] & hazardous_sectors[1:])
+        )
+        if spatially_supported:
+            self.ttc_candidate_scans += 1
+        else:
+            self.ttc_candidate_scans = 0
+        ttc_confirmed = self.ttc_candidate_scans >= self.TTC_CONFIRM_SCANS
+        # Give SAC the aligned estimate before the shield's persistence gate,
+        # so it can act early rather than only after an emergency override.
+        self.safety_sector_ttc = np.clip(sector_ttc, 0.0, 5.0)
+        self.safety_min_ttc = min_ttc
+        if not self.safety_override_enabled:
+            return
+        emergency = (
+            not np.any(observed)
+            or min_range <= self.emergency_distance
+            or ttc_confirmed
+        )
+        if emergency:
+            self.safety_release_after = self._control_time() + self.safety_hold_time
+            if not self.safety_active:
+                self.get_logger().warning(
+                    "TTC safety override active: applying emergency speed scale "
+                    f"(range={min_range:.3f} m, TTC={min_ttc:.3f} s, "
+                    f"confirmed_scans={self.ttc_candidate_scans})"
+                )
+            self.safety_active = True
+            if self.controller_verified and self.applied_scale > self.emergency_scale:
+                self.publish_scale(self.emergency_scale)
+
     def update_callback(self):
         control_now = self._control_time()
         wall_now = time.monotonic()
         if not self.controller_verified:
             return
+
+        if control_now < self.last_apply_time:
+            # MuJoCo episode reset can rewind /clock.  Do not carry an RL
+            # lease or an old safety hold across that discontinuity.
+            self.last_apply_time = control_now
+            self.last_rl_message = None
+            self.safety_active = False
+            self.safety_release_after = control_now
+            self.scan_history.clear()
+            self.last_scan_time = None
+            self.ttc_candidate_scans = 0
+            self.latest_yaw = None
+            self.safety_sector_ttc.fill(5.0)
 
         if self.speed_limit_publisher.get_subscription_count() < 1:
             self.controller_verified = False
@@ -448,12 +727,15 @@ class RlVelocitySupervisor(Node):
             )
             return
 
-        command_stale = (
-            self.last_rl_message is None
-            or control_now - self.last_rl_message > self.watchdog_timeout
+        command_age = (
+            math.inf
+            if self.last_rl_message is None
+            else control_now - self.last_rl_message
         )
+        command_stale = command_age < 0.0 or command_age > self.watchdog_timeout
         if command_stale:
             desired_scale = self.scale_max
+            watchdog_just_activated = not self.watchdog_active
             if not self.watchdog_active:
                 self.get_logger().warning(
                     "RL watchdog timeout: removing the MPPI speed limit"
@@ -461,20 +743,33 @@ class RlVelocitySupervisor(Node):
                 self.watchdog_active = True
         else:
             desired_scale = self.target_scale
+            watchdog_just_activated = False
+
+        if self.safety_active:
+            if control_now < self.safety_release_after:
+                desired_scale = min(desired_scale, self.emergency_scale)
+            else:
+                self.safety_active = False
+                self.get_logger().info(
+                    "TTC safety override released; returning to smoothed RL control"
+                )
+
+        if watchdog_just_activated and not self.safety_active:
+            self.publish_scale(self.scale_max)
+            return
 
         dt = min(max(control_now - self.last_apply_time, 0.001), 0.5)
-        filtered_scale = (
-            self.applied_scale
-            + self.lowpass_alpha
-            * (desired_scale - self.applied_scale)
-        )
-        next_scale = self.move_towards(
-            self.applied_scale,
-            filtered_scale,
-            self.scale_slew_rate * dt,
-        )
+        if self.safety_active and desired_scale < self.applied_scale:
+            next_scale = desired_scale
+        else:
+            next_scale = self.smoothed_scale_step(
+                self.applied_scale, desired_scale, dt,
+                self.scale_slew_rate, self.lowpass_alpha,
+                self.scale_fall_slew_rate, self.fall_lowpass_alpha,
+            )
 
         if abs(next_scale - self.applied_scale) < self.VALUE_EPSILON:
+            self.publish_status()
             return
 
         self.publish_scale(next_scale)
@@ -495,12 +790,19 @@ class RlVelocitySupervisor(Node):
         self.applied_scale = scale
         self.last_apply_time = self._control_time()
 
+        self.publish_status()
+
+    def publish_status(self):
+        """Publish a latched acknowledgement and safety diagnostics."""
+
         status_msg = Float32MultiArray()
         status_msg.data = [
-            float(scale),
-            float(self.baseline_vx * scale),
-            float(self.baseline_wz * scale),
-        ]
+            float(self.applied_scale),
+            float(self.baseline_vx * self.applied_scale),
+            float(self.baseline_wz * self.applied_scale),
+            float(self.safety_active),
+            float(self.safety_min_ttc),
+        ] + self.safety_sector_ttc.astype(float).tolist()
         self.applied_status_publisher.publish(status_msg)
 
     def restore_baseline(self):
@@ -523,7 +825,10 @@ def main(args=None):
                 node.restore_baseline()
             except Exception:
                 pass
-            node.destroy_node()
+            try:
+                node.destroy_node()
+            except KeyboardInterrupt:
+                pass
         if rclpy.ok():
             rclpy.shutdown()
 

@@ -1,48 +1,40 @@
 #!/usr/bin/env python3
-"""MuJoCo Gym environment for Gazebo Phase-2 SAC fine-tuning.
+"""MuJoCo Gym environment for the one-dimensional Nav2 speed supervisor.
 
-This is the active environment in the original workspace. It preserves the
-checkpoint contract validated by the isolated A/B workspace.
 Updated with:
 - Continuing Task mode (episodes do not terminate on goal reach/abort).
 - Random & Safe goal generation using Global Costmap across the map.
-- Soft Reset on Truncation: Never reset to (0,0) unless there's a collision.
+- Soft reset on ordinary time limits; hard reset after collision or a
+  sustained front safety stop with no robot motion.
 - [PATCH] info["is_success"] now populated at episode end so SB3's
   ep_success_buffer / rollout/success_rate are no longer empty.
 - [PATCH] Hard reset after collision now RETRIES automatically instead of
   crashing the whole training process if one ROS2 call times out.
-- [GROUP1] Observation nay la "egocentric": goal bearing tinh TUONG DOI so
-  voi huong mui robot (khong con tuyet doi theo truc X cua map), va co
-  them van toc that (linear + angular) tu /odometry/filtered. Observation
-  shape doi tu (26,) -> (28,) -> PHA VO checkpoint contract cu, BAT BUOC
-  train lai tu dau (da xac nhan voi nguoi dung, checkpoint hien tai moi
-  ~10k step nen chi phi doi bo rat thap).
-- [GROUP2] reward_speed doi tu dung applied[0] (tran vx_max RL vua DAT,
-  khong phan anh toc do THAT) sang dung state["linear_velocity"] do THAT
-  tu odometry -> loai bo ke ho "reward hacking" (agent hoc cach set tran
-  cao ma khong can robot thuc su di nhanh). Them reward_smoothness phat
-  action thay doi dot ngot giua 2 step lien tiep (chuan hoa theo bien do
-  moi chieu action, vi cac chieu co thang do rat khac nhau).
+- Goal bearing is egocentric and measured velocity comes from filtered odom.
+- RL action is exactly ``[speed_scale]``.  The environment publishes it on
+  ``/rl_velocity_limits`` and observes the supervisor acknowledgement on
+  ``/rl_velocity_limits_applied``.  It never changes MPPI parameters.
+- Observation includes per-sector TTC, the actually applied scale and hazard
+  persistence so lateral/crossing motion is visible to the policy.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import threading
 import time
+from collections import deque
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 import gymnasium as gym
 import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import Point, PoseWithCovarianceStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import Odometry, OccupancyGrid
-from rcl_interfaces.msg import Parameter as ParameterMsg
-from rcl_interfaces.msg import ParameterType, ParameterValue
-from rcl_interfaces.srv import SetParameters
 from rclpy.action import ActionClient
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -52,12 +44,16 @@ from rclpy.time import Time
 from robot_localization.srv import SetPose
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Bool, Int32
+from std_msgs.msg import Bool, Float32MultiArray, Int32, String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
 Goal = Tuple[float, float, float]
+
+
+class NavigationGoalRejected(RuntimeError):
+    """Nav2 action server explicitly refused a NavigateToPose goal."""
 
 
 def quaternion_from_yaw(yaw: float) -> Tuple[float, float]:
@@ -73,14 +69,17 @@ def normalize_angle(angle: float) -> float:
 
 
 class AgvRosInterface(Node):
-    """ROS backend connecting the 28D/4D Gym contract to MuJoCo/Nav2."""
+    """ROS backend connecting the front-sector observation to Nav2."""
 
     LIDAR_BEAMS = 24
-    LIDAR_ANGLE_MIN = -2.0943951
-    LIDAR_ANGLE_MAX = 2.0943951
+    # Match the usable forward field of view of the fixed real LiDAR mount.
+    LIDAR_ANGLE_MIN = -math.pi / 3.0
+    LIDAR_ANGLE_MAX = math.pi / 3.0
     LIDAR_REPLACEMENT_RANGE = 10.0
+    TTC_MAX = 5.0
+    DYNAMIC_OBSTACLE_PARK = (20.0, 20.0, 0.5)
 
-    def __init__(self) -> None:
+    def __init__(self, retain_dynamic_obstacle_after_crossing: bool = False) -> None:
         super().__init__(
             "gazebo_phase2_finetune_environment",
             parameter_overrides=[Parameter("use_sim_time", value=True)],
@@ -89,6 +88,8 @@ class AgvRosInterface(Node):
         self.scan_ready = threading.Event()
         self.odom_ready = threading.Event()
         self.clock_ready = threading.Event()
+        self.front_safety_stop_ready = threading.Event()
+        self.front_safety_diagnostics_ready = threading.Event()
         self.scan_seq = 0
         self.odom_seq = 0
         self.sim_time = 0.0
@@ -97,11 +98,45 @@ class AgvRosInterface(Node):
             self.LIDAR_REPLACEMENT_RANGE,
             dtype=np.float32,
         )
+        self.front_scan_x = np.empty(0, dtype=np.float32)
+        self.front_scan_y = np.empty(0, dtype=np.float32)
+        self.front_scan_valid = False
+        self.front_scan_time_s: Optional[float] = None
+        self.sector_ttc = np.full(
+            self.LIDAR_BEAMS,
+            self.TTC_MAX,
+            dtype=np.float32,
+        )
+        self.last_supervisor_status_time = None
+        self.hazard_persistence = 0.0
+        self.applied_speed_scale = 1.0
+        self.safety_override_active = False
+        self.front_safety_stop_active = False
+        self.front_safety_stop_events = 0
+        self.front_safety_stop_reason = 0
+        self.front_safety_stop_clearance_m = math.inf
+        self.front_safety_stop_distance_m = math.inf
+        self.supervisor_min_ttc = math.inf
+        self.minimum_sector_ttc_since_reset = self.TTC_MAX
+        self.dynamic_obstacle_spawns_since_reset = 0
+        self.dynamic_obstacle_trajectory = None
+        self.dynamic_obstacle_position = self.DYNAMIC_OBSTACLE_PARK
+        self.retain_dynamic_obstacle_after_crossing = bool(
+            retain_dynamic_obstacle_after_crossing
+        )
+        self.dynamic_obstacle_parked_after_crossing = False
+        self.applied_speed_scale_ready = threading.Event()
         self.linear_velocity = 0.0
         self.angular_velocity = 0.0
+        # Nav2 command before the simulation-only last-resort front gate.
+        # Keep this as telemetry; it is not part of the policy observation.
+        self.cmd_vx_m_s = 0.0
+        self.cmd_wz_rad_s = 0.0
+        self.cmd_vel_time_s: Optional[float] = None
         self.collision_since_reset = False
         self.collision_active = False
         self.collision_event_count = 0
+        self.collision_events = []
         self.max_contact_count = 0
         self.minimum_lidar_since_reset = self.LIDAR_REPLACEMENT_RANGE
         self.minimum_lidar_since_step = self.LIDAR_REPLACEMENT_RANGE
@@ -114,6 +149,7 @@ class AgvRosInterface(Node):
         # Lưu trữ Costmap
         self.costmap = None
         self.costmap_occupied_threshold = 50
+        self.costmap_lethal_threshold = 99
 
         sensor_qos = QoSProfile(
             depth=5,
@@ -133,7 +169,7 @@ class AgvRosInterface(Node):
 
         self.create_subscription(
             LaserScan,
-            "/scan_raw",
+            "/scan",
             self._scan_callback,
             sensor_qos,
         )
@@ -141,6 +177,12 @@ class AgvRosInterface(Node):
             Odometry,
             "/odometry/filtered",
             self._odom_callback,
+            20,
+        )
+        self.create_subscription(
+            Twist,
+            "/cmd_vel",
+            self._cmd_vel_callback,
             20,
         )
         self.create_subscription(
@@ -156,11 +198,49 @@ class AgvRosInterface(Node):
             20,
         )
         self.create_subscription(
+            String,
+            "/collision_event",
+            self._collision_event_callback,
+            20,
+        )
+        self.create_subscription(
+            Bool,
+            "/sim_front_safety_stop",
+            self._front_safety_stop_callback,
+            20,
+        )
+        self.create_subscription(
+            Float32MultiArray,
+            "/sim_front_safety_diagnostics",
+            self._front_safety_diagnostics_callback,
+            20,
+        )
+        self.create_subscription(
             OccupancyGrid,
             "/global_costmap/costmap",
             self._costmap_callback,
             costmap_qos,
         )
+        applied_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(
+            Float32MultiArray,
+            "/rl_velocity_limits_applied",
+            self._applied_speed_scale_callback,
+            applied_qos,
+        )
+        self.speed_scale_publisher = self.create_publisher(
+            Float32MultiArray,
+            "/rl_velocity_limits",
+            10,
+        )
+        self.dynamic_obstacle_publisher = self.create_publisher(
+            Point, "/dynamic_obstacle/position", 10,
+        )
+        self.create_timer(0.05, self._dynamic_obstacle_tick)
         
         clock_qos = QoSProfile(
             depth=1,
@@ -186,6 +266,10 @@ class AgvRosInterface(Node):
         )
         self.randomization_client = self.create_client(
             Trigger, "/resample_domain_randomization")
+        self.randomization_sequence_reset_client = self.create_client(
+            Trigger,
+            "/reset_domain_randomization_sequence",
+        )
         self.set_ekf_pose_client = self.create_client(SetPose, "/set_pose")
         self.clear_global_costmap_client = self.create_client(
             ClearEntireCostmap,
@@ -194,10 +278,6 @@ class AgvRosInterface(Node):
         self.clear_local_costmap_client = self.create_client(
             ClearEntireCostmap,
             "/local_costmap/clear_entirely_local_costmap",
-        )
-        self.mppi_parameter_client = self.create_client(
-            SetParameters,
-            "/controller_server/set_parameters",
         )
         self.navigation_client = ActionClient(
             self,
@@ -214,6 +294,8 @@ class AgvRosInterface(Node):
     def _scan_callback(self, msg: LaserScan) -> None:
         ranges = np.asarray(msg.ranges, dtype=np.float32)
         if ranges.size == 0:
+            with self.lock:
+                self.front_scan_valid = False
             return
         angles = (
             float(msg.angle_min)
@@ -226,9 +308,41 @@ class AgvRosInterface(Node):
         )
         filtered = ranges[mask]
         if filtered.size < self.LIDAR_BEAMS:
+            with self.lock:
+                self.front_scan_valid = False
             return
+        sectors = np.array_split(filtered, self.LIDAR_BEAMS)
+        # A masked sector is unknown, not free space at maximum range.
+        if any(np.all(np.isnan(sector)) for sector in sectors):
+            with self.lock:
+                self.front_scan_valid = False
+            return
+        # The v5 risk channels use the same raw front returns on simulator
+        # and robot; they never consume simulation-only gate diagnostics.
+        range_min_raw = float(msg.range_min)
+        range_max_raw = float(msg.range_max)
+        if (
+            not math.isfinite(range_min_raw)
+            or math.isnan(range_max_raw)
+            or range_min_raw < 0.0
+            or range_max_raw <= range_min_raw
+        ):
+            with self.lock:
+                self.front_scan_valid = False
+            return
+        range_min = range_min_raw
+        range_max = min(self.LIDAR_REPLACEMENT_RANGE, range_max_raw)
+        valid_return = (
+            np.isfinite(filtered)
+            & (filtered >= range_min)
+            & (filtered <= range_max)
+        )
+        front_x = filtered[valid_return] * np.cos(angles[mask][valid_return])
+        front_y = filtered[valid_return] * np.sin(angles[mask][valid_return])
         filtered = np.where(
-            (~np.isfinite(filtered)) | (filtered < 0.15),
+            (~np.isfinite(filtered))
+            | (filtered < range_min)
+            | (filtered > range_max),
             self.LIDAR_REPLACEMENT_RANGE,
             filtered,
         )
@@ -241,6 +355,10 @@ class AgvRosInterface(Node):
         )
         with self.lock:
             self.lidar = reduced
+            self.front_scan_x = front_x.astype(np.float32)
+            self.front_scan_y = front_y.astype(np.float32)
+            self.front_scan_valid = True
+            self.front_scan_time_s = float(getattr(self, "sim_time", math.nan))
             self.minimum_lidar_since_reset = min(
                 self.minimum_lidar_since_reset,
                 float(np.min(reduced)),
@@ -251,12 +369,54 @@ class AgvRosInterface(Node):
             self.scan_seq += 1
             self.scan_ready.set()
 
+    def _applied_speed_scale_callback(self, msg: Float32MultiArray) -> None:
+        # The v4 contract requires the supervisor's confirmed 24-sector TTC.
+        if len(msg.data) < 5 + self.LIDAR_BEAMS:
+            return
+        sector_ttc = np.asarray(
+            msg.data[5:5 + self.LIDAR_BEAMS], dtype=np.float32
+        )
+        if (
+            not math.isfinite(float(msg.data[0]))
+            or not np.all(np.isfinite(sector_ttc))
+        ):
+            return
+        with self.lock:
+            self.applied_speed_scale = float(msg.data[0])
+            self.safety_override_active = bool(msg.data[3])
+            self.supervisor_min_ttc = float(msg.data[4])
+            self.sector_ttc = np.clip(sector_ttc, 0.0, self.TTC_MAX)
+            self.minimum_sector_ttc_since_reset = min(
+                self.minimum_sector_ttc_since_reset,
+                float(np.min(self.sector_ttc)),
+            )
+            now = self.get_clock().now().nanoseconds * 1.0e-9
+            dt = (
+                min(now - self.last_supervisor_status_time, 1.0)
+                if self.last_supervisor_status_time is not None
+                and now > self.last_supervisor_status_time
+                else 0.0
+            )
+            self.hazard_persistence = (
+                min(self.hazard_persistence + dt, 10.0)
+                if self.safety_override_active
+                else 0.0
+            )
+            self.last_supervisor_status_time = now
+            self.applied_speed_scale_ready.set()
+
     def _odom_callback(self, msg: Odometry) -> None:
         with self.lock:
             self.linear_velocity = float(msg.twist.twist.linear.x)
             self.angular_velocity = float(msg.twist.twist.angular.z)
             self.odom_seq += 1
             self.odom_ready.set()
+
+    def _cmd_vel_callback(self, msg: Twist) -> None:
+        with self.lock:
+            self.cmd_vx_m_s = float(msg.linear.x)
+            self.cmd_wz_rad_s = float(msg.angular.z)
+            self.cmd_vel_time_s = float(getattr(self, "sim_time", math.nan))
 
     def _collision_callback(self, msg: Bool) -> None:
         with self.lock:
@@ -273,6 +433,33 @@ class AgvRosInterface(Node):
                 int(msg.data),
             )
 
+    def _collision_event_callback(self, msg: String) -> None:
+        try:
+            event = json.loads(msg.data)
+        except (TypeError, ValueError) as exc:
+            self.get_logger().warning(f"Invalid /collision_event: {exc}")
+            return
+        if not isinstance(event, dict):
+            self.get_logger().warning("Invalid /collision_event: expected object")
+            return
+        with self.lock:
+            self.collision_events.append(event)
+
+    def _front_safety_stop_callback(self, msg: Bool) -> None:
+        with self.lock:
+            if msg.data and not self.front_safety_stop_active:
+                self.front_safety_stop_events += 1
+            self.front_safety_stop_active = bool(msg.data)
+            self.front_safety_stop_ready.set()
+
+    def _front_safety_diagnostics_callback(self, msg: Float32MultiArray) -> None:
+        if len(msg.data) >= 6:
+            with self.lock:
+                self.front_safety_stop_clearance_m = float(msg.data[1])
+                self.front_safety_stop_distance_m = float(msg.data[2])
+                self.front_safety_stop_reason = int(msg.data[5])
+            self.front_safety_diagnostics_ready.set()
+
     def _costmap_callback(self, msg: OccupancyGrid) -> None:
         with self.lock:
             self.costmap = msg
@@ -287,6 +474,62 @@ class AgvRosInterface(Node):
     def current_sim_time(self) -> float:
         with self.lock:
             return float(self.sim_time)
+
+    def _publish_dynamic_obstacle(self, position: Tuple[float, float, float]) -> None:
+        with self.lock:
+            self.dynamic_obstacle_position = tuple(float(value) for value in position)
+        self.dynamic_obstacle_publisher.publish(
+            Point(x=float(position[0]), y=float(position[1]), z=float(position[2]))
+        )
+
+    def park_dynamic_obstacle(self) -> None:
+        with self.lock:
+            self.dynamic_obstacle_trajectory = None
+            self.dynamic_obstacle_parked_after_crossing = False
+        self._publish_dynamic_obstacle(self.DYNAMIC_OBSTACLE_PARK)
+
+    def start_dynamic_obstacle(
+        self,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        speed_m_s: float,
+    ) -> None:
+        distance = math.dist(start, end)
+        if not math.isfinite(distance) or not math.isfinite(speed_m_s) or speed_m_s <= 0.0:
+            raise ValueError("Dynamic-obstacle trajectory must be finite with positive speed")
+        with self.lock:
+            self.dynamic_obstacle_trajectory = (
+                tuple(start), tuple(end), self.sim_time, distance / speed_m_s,
+            )
+            self.dynamic_obstacle_parked_after_crossing = False
+            self.dynamic_obstacle_spawns_since_reset += 1
+        self._publish_dynamic_obstacle((start[0], start[1], 0.5))
+
+    def _dynamic_obstacle_tick(self) -> None:
+        with self.lock:
+            trajectory = self.dynamic_obstacle_trajectory
+            sim_time = self.sim_time
+            if trajectory is None:
+                return
+            start, end, start_time, duration = trajectory
+            fraction = (sim_time - start_time) / duration
+            if fraction < 0.0 or fraction >= 1.0:
+                self.dynamic_obstacle_trajectory = None
+                self.dynamic_obstacle_parked_after_crossing = (
+                    self.retain_dynamic_obstacle_after_crossing
+                )
+                position = (
+                    (end[0], end[1], 0.5)
+                    if self.retain_dynamic_obstacle_after_crossing
+                    else self.DYNAMIC_OBSTACLE_PARK
+                )
+            else:
+                position = (
+                    start[0] + fraction * (end[0] - start[0]),
+                    start[1] + fraction * (end[1] - start[1]),
+                    0.5,
+                )
+        self._publish_dynamic_obstacle(position)
 
     def wait_for_sim_duration(
         self,
@@ -325,8 +568,19 @@ class AgvRosInterface(Node):
 
         raise RuntimeError("ROS stopped during the action interval")
 
-    def is_position_free(self, x: float, y: float) -> bool:
-        """Check if position is free on the global costmap."""
+    def is_position_free(
+        self,
+        x: float,
+        y: float,
+        clearance_radius_m: float = 0.0,
+    ) -> bool:
+        """Check a point or circular footprint against the global costmap.
+
+        Unknown cells and circles extending outside the costmap fail closed.
+        The default radius preserves point checks used by obstacle spawning.
+        """
+        if not math.isfinite(clearance_radius_m) or clearance_radius_m < 0.0:
+            raise ValueError("clearance_radius_m must be finite and non-negative")
         with self.lock:
             if self.costmap is None:
                 return False
@@ -338,23 +592,95 @@ class AgvRosInterface(Node):
             if mx < 0 or my < 0 or mx >= info.width or my >= info.height:
                 return False
 
-            index = my * info.width + mx
-            value = self.costmap.data[index]
-
-            if value < 0:
+            # Occupancy values represent square cells. Test exact circle/AABB
+            # intersection so a candidate near a cell boundary cannot skip a
+            # neighboring lethal or unknown cell.
+            center_value = self.costmap.data[my * info.width + mx]
+            if center_value < 0 or center_value >= self.costmap_occupied_threshold:
                 return False
-            return value < self.costmap_occupied_threshold
+            if clearance_radius_m == 0.0:
+                return True
+
+            origin_x = info.origin.position.x
+            origin_y = info.origin.position.y
+            min_cell_x = math.floor(
+                (x - clearance_radius_m - origin_x) / info.resolution
+            )
+            max_cell_x = math.floor(
+                (x + clearance_radius_m - origin_x) / info.resolution
+            )
+            min_cell_y = math.floor(
+                (y - clearance_radius_m - origin_y) / info.resolution
+            )
+            max_cell_y = math.floor(
+                (y + clearance_radius_m - origin_y) / info.resolution
+            )
+            if (
+                min_cell_x < 0 or min_cell_y < 0
+                or max_cell_x >= info.width or max_cell_y >= info.height
+            ):
+                return False
+            lethal_threshold = getattr(self, "costmap_lethal_threshold", 99)
+            for cell_y in range(min_cell_y, max_cell_y + 1):
+                cell_bottom = origin_y + cell_y * info.resolution
+                cell_top = cell_bottom + info.resolution
+                closest_y = min(max(y, cell_bottom), cell_top)
+                for cell_x in range(min_cell_x, max_cell_x + 1):
+                    cell_left = origin_x + cell_x * info.resolution
+                    cell_right = cell_left + info.resolution
+                    closest_x = min(max(x, cell_left), cell_right)
+                    if math.hypot(x - closest_x, y - closest_y) > clearance_radius_m:
+                        continue
+                    value = self.costmap.data[cell_y * info.width + cell_x]
+                    if value < 0 or value >= lethal_threshold:
+                        return False
+            return True
 
     def current_state(self) -> Dict[str, Any]:
         with self.lock:
             return {
                 "lidar": self.lidar.copy(),
+                "front_scan_x": self.front_scan_x.copy(),
+                "front_scan_y": self.front_scan_y.copy(),
+                "front_scan_valid": bool(self.front_scan_valid),
+                "front_scan_age_s": (
+                    max(0.0, float(self.sim_time - self.front_scan_time_s))
+                    if self.front_scan_time_s is not None
+                    and self.sim_time >= self.front_scan_time_s
+                    else math.inf
+                ),
+                "sector_ttc": self.sector_ttc.copy(),
+                "hazard_persistence": float(self.hazard_persistence),
+                "applied_speed_scale": float(self.applied_speed_scale),
+                "safety_override_active": bool(self.safety_override_active),
+                "front_safety_stop_active": bool(self.front_safety_stop_active),
+                "front_safety_stop_events": int(self.front_safety_stop_events),
+                "front_safety_stop_reason": int(self.front_safety_stop_reason),
+                "front_safety_stop_clearance_m": float(self.front_safety_stop_clearance_m),
+                "front_safety_stop_distance_m": float(self.front_safety_stop_distance_m),
+                "supervisor_min_ttc": float(self.supervisor_min_ttc),
+                "min_sector_ttc_episode": float(self.minimum_sector_ttc_since_reset),
+                "dynamic_obstacle_spawns": int(self.dynamic_obstacle_spawns_since_reset),
+                "dynamic_obstacle_active": self.dynamic_obstacle_trajectory is not None,
+                "dynamic_obstacle_position": list(self.dynamic_obstacle_position),
+                "dynamic_obstacle_parked_after_crossing": bool(
+                    self.dynamic_obstacle_parked_after_crossing
+                ),
                 "scan_seq": int(self.scan_seq),
                 "odom_seq": int(self.odom_seq),
                 "linear_velocity": float(self.linear_velocity),
                 "angular_velocity": float(self.angular_velocity),
+                "cmd_vx_m_s": float(self.cmd_vx_m_s),
+                "cmd_wz_rad_s": float(self.cmd_wz_rad_s),
+                "cmd_vel_age_s": (
+                    max(0.0, float(self.sim_time - self.cmd_vel_time_s))
+                    if self.cmd_vel_time_s is not None
+                    and self.sim_time >= self.cmd_vel_time_s
+                    else math.inf
+                ),
                 "collision": bool(self.collision_since_reset),
                 "collision_event_count": int(self.collision_event_count),
+                "collision_events": list(self.collision_events),
                 "contact_count": int(self.max_contact_count),
                 "minimum_lidar": float(self.minimum_lidar_since_reset),
                 "minimum_lidar_step": float(self.minimum_lidar_since_step),
@@ -370,10 +696,26 @@ class AgvRosInterface(Node):
             self.collision_since_reset = False
             self.collision_active = False
             self.collision_event_count = 0
+            self.collision_events.clear()
+            self.front_safety_stop_active = False
+            self.front_safety_stop_events = 0
+            self.front_safety_stop_reason = 0
+            self.front_safety_stop_clearance_m = math.inf
+            self.front_safety_stop_distance_m = math.inf
             self.max_contact_count = 0
             self.minimum_lidar_since_reset = self.LIDAR_REPLACEMENT_RANGE
             self.minimum_lidar_since_step = self.LIDAR_REPLACEMENT_RANGE
             self.goal_result_status = None
+            self.last_supervisor_status_time = None
+            self.sector_ttc.fill(self.TTC_MAX)
+            self.minimum_sector_ttc_since_reset = self.TTC_MAX
+            self.dynamic_obstacle_spawns_since_reset = 0
+            self.hazard_persistence = 0.0
+
+    def publish_speed_scale(self, scale: float) -> None:
+        msg = Float32MultiArray()
+        msg.data = [float(scale)]
+        self.speed_scale_publisher.publish(msg)
 
     def get_map_pose(self) -> Tuple[float, float, float]:
         transform = self.tf_buffer.lookup_transform(
@@ -403,10 +745,16 @@ class AgvRosInterface(Node):
             raise RuntimeError(f"{description} failed: {exception}")
         return future.result()
 
-    def wait_until_ready(self, timeout: float = 20.0) -> None:
+    def wait_until_ready(
+        self, timeout: float = 20.0, require_supervisor: bool = True
+    ) -> None:
         deadline = time.monotonic() + timeout
         clients = (
             (self.randomization_client, "/resample_domain_randomization"),
+            (
+                self.randomization_sequence_reset_client,
+                "/reset_domain_randomization_sequence",
+            ),
             (self.reset_simulation_client, "/reset_simulation"),
             (self.set_ekf_pose_client, "/set_pose"),
             (
@@ -416,10 +764,6 @@ class AgvRosInterface(Node):
             (
                 self.clear_local_costmap_client,
                 "/local_costmap/clear_entirely_local_costmap",
-            ),
-            (
-                self.mppi_parameter_client,
-                "/controller_server/set_parameters",
             ),
         )
         for client, name in clients:
@@ -437,7 +781,7 @@ class AgvRosInterface(Node):
             )
         remaining = max(0.0, deadline - time.monotonic())
         if not self.scan_ready.wait(timeout=remaining):
-            raise RuntimeError("No LaserScan received on /scan_raw")
+            raise RuntimeError("No LaserScan received on /scan")
         remaining = max(0.0, deadline - time.monotonic())
         if not self.odom_ready.wait(timeout=remaining):
             raise RuntimeError(
@@ -446,6 +790,22 @@ class AgvRosInterface(Node):
         remaining = max(0.0, deadline - time.monotonic())
         if not self.clock_ready.wait(timeout=remaining):
             raise RuntimeError("No simulation time received on /clock")
+        if not require_supervisor:
+            return
+        remaining = max(0.0, deadline - time.monotonic())
+        while (
+            self.speed_scale_publisher.get_subscription_count() < 1
+            and remaining > 0.0
+        ):
+            time.sleep(0.05)
+            remaining = max(0.0, deadline - time.monotonic())
+        if self.speed_scale_publisher.get_subscription_count() < 1:
+            raise RuntimeError("No RL supervisor subscribed to /rl_velocity_limits")
+        remaining = max(0.0, deadline - time.monotonic())
+        if not self.applied_speed_scale_ready.wait(timeout=remaining):
+            raise RuntimeError(
+                "No supervisor status received on /rl_velocity_limits_applied"
+            )
 
     def cancel_navigation(self, timeout: float = 3.0) -> None:
         goal_handle = self.goal_handle
@@ -575,7 +935,10 @@ class AgvRosInterface(Node):
             "NavigateToPose goal acceptance",
         )
         if not handle.accepted:
-            raise RuntimeError("NavigateToPose rejected the training goal")
+            raise NavigationGoalRejected(
+                f"NavigateToPose rejected goal ({x:.2f}, {y:.2f}, "
+                f"{math.degrees(yaw):.1f} deg)"
+            )
         with self.lock:
             self.goal_handle = handle
             self.goal_result_status = None
@@ -600,64 +963,26 @@ class AgvRosInterface(Node):
                 self.goal_result_status = status
                 self.goal_handle = None
 
-    def set_mppi_parameters(
-        self,
-        vx_max: float,
-        path_weight: float,
-        goal_weight: float,
-        goal_angle_weight: float,
-        timeout: float = 3.0,
-    ) -> None:
-        request = SetParameters.Request()
-        values = (
-            ("FollowPath.vx_max", vx_max),
-            ("FollowPath.PathAlignCritic.cost_weight", path_weight),
-            ("FollowPath.GoalCritic.cost_weight", goal_weight),
-            (
-                "FollowPath.GoalAngleCritic.cost_weight",
-                goal_angle_weight,
-            ),
-        )
-        for name, value in values:
-            parameter = ParameterMsg()
-            parameter.name = name
-            parameter.value = ParameterValue(
-                type=ParameterType.PARAMETER_DOUBLE,
-                double_value=float(value),
-            )
-            request.parameters.append(parameter)
-        future = self.mppi_parameter_client.call_async(request)
-        response = self._wait_future(
-            future,
-            timeout,
-            "/controller_server/set_parameters",
-        )
-        failures = [
-            result.reason or "unspecified failure"
-            for result in response.results
-            if not result.successful
-        ]
-        if failures:
-            raise RuntimeError(
-                "MPPI rejected Phase-2 action: " + "; ".join(failures)
-            )
-
-
 class AgvRlEnv(gym.Env):
-    """Phase-2 environment used to fine-tune the Gazebo checkpoint."""
+    """Train a policy that only selects the Nav2 velocity-envelope scale."""
 
     metadata = {"render_modes": []}
+    # Timing and reward semantics are part of the contract even though the
+    # tensor shapes are unchanged.  V4 uses the supervisor's rotation-aligned
+    # TTC sectors, so v3 replay and checkpoints have different semantics.
+    CONTRACT_VERSION = "speedlimit-v5-front120-56x1-1hz-proactive-risk"
+    CONTRACT_VERSION_NO_TTC = "speedlimit-v5-front120-31x1-1hz-no-ttc"
+    # Model weights remain transferable; replay rewards must match this tag.
+    REWARD_CONTRACT_VERSION = "front-corridor-proactive-risk-v2"
+    REWARD_CONTRACT_VERSION_NO_TTC = "front-corridor-sac-only-v1"
+    REWARD_CONTRACT_VERSION_CONSERVATIVE = "front-lateral-sac-only-v1"
+    REWARD_CONTRACT_VERSION_CONSERVATIVE_RETAINED = (
+        "front-lateral-sac-only-v4-classified-stall-reset"
+    )
 
-    ACTION_LOW = np.asarray([0.05, 0.5, 5.0, 1.0], dtype=np.float32)
-    ACTION_HIGH = np.asarray([1.0, 15.0, 25.0, 15.0], dtype=np.float32)
-    SOURCE_NOMINAL_ACTION = np.asarray(
-        [0.25, 5.0, 14.0, 8.0],
-        dtype=np.float32,
-    )
-    NATIVE_MUJOCO_ACTION = np.asarray(
-        [0.40, 14.0, 5.0, 3.0],
-        dtype=np.float32,
-    )
+    ACTION_LOW = np.asarray([0.15], dtype=np.float32)
+    ACTION_HIGH = np.asarray([1.0], dtype=np.float32)
+    SOURCE_NOMINAL_ACTION = np.asarray([1.0], dtype=np.float32)
 
     # KHÔI PHỤC COMBINED_GOALS để train_sac.py có thể đọc được
     COMBINED_GOALS: Tuple[Goal, ...] = (
@@ -668,29 +993,51 @@ class AgvRlEnv(gym.Env):
 
     MAX_SCAN_RANGE = 10.0
     MAX_EXPECTED_GOAL_DISTANCE = 20.0
-    STEP_WAIT_DURATION = 5.05
+    STEP_WAIT_DURATION = 1.0
+    DENSE_REWARD_REFERENCE_SECONDS = 5.05
     SAFE_DISTANCE = 0.60
     COLLISION_DISTANCE = 0.25
     SAFETY_REWARD_CLIP = -20.0
     COLLISION_REWARD = -50.0
     GOAL_REWARD = 100.0
     NAV_ABORT_REWARD = -30.0
+    FRONT_STOP_REQUEST_PENALTY_WEIGHT = 5.0
+    FRONT_RISK_PENALTY_WEIGHT = 1.0
+    FRONT_RISK_LOOKAHEAD_M = 0.40
+    FRONT_RISK_MARGIN_NORM_M = 2.0
+    FRONT_RISK_NOMINAL_VX_M_S = 0.70
+    FRONT_RISK_CORRIDOR_HALF_WIDTH_M = 0.45
+    FRONT_RISK_REACTION_S = 0.40
+    FRONT_RISK_CLEARANCE_M = 0.40
+    FRONT_RISK_DECELERATION_M_S2 = 0.80
+    FRONT_RISK_RELEASE_RESERVE_M = 0.15
+    FRONT_RISK_SCAN_TIMEOUT_S = 0.25
+    CONSERVATIVE_LATERAL_REWARD_WEIGHT = 20.0
+    CONSERVATIVE_LATERAL_MIN_X_M = 0.75
+    CONSERVATIVE_LATERAL_MAX_X_M = 3.0
+    CONSERVATIVE_LATERAL_MIN_Y_M = 0.65
+    CONSERVATIVE_LATERAL_MAX_Y_M = 1.75
+    # Robot half-diagonal is about 0.56 m including Nav2 padding. Keep random
+    # goal centres farther away so the terminal pose has room to rotate.
+    GOAL_CLEARANCE_M = 0.80
+    SAFETY_DEADLOCK_STEPS = 20
+    SAFETY_DEADLOCK_MIN_BLOCKED_STEPS = 14
+    SAFETY_DEADLOCK_MAX_DISPLACEMENT_M = 0.10
+    SAFETY_DEADLOCK_MAX_YAW_RAD = math.radians(15.0)
+    MOTION_STALL_STEPS = 30
+    MOTION_STALL_MAX_DISPLACEMENT_M = 0.20
 
-    # [GROUP1] Kích thước observation mới: 24 lidar + dist + bearing TƯƠNG
-    # ĐỐI + linear_velocity + angular_velocity = 28 (trước là 26).
-    OBSERVATION_DIM = 28
-    # [GROUP1] Hằng số chuẩn hoá vận tốc trong observation. Đặt cao hơn
-    # trần vật lý 1 chút (ACTION_HIGH[0]=1.0 cho vx_max, wz_max=0.8 trong
-    # nav2_mppi_params.yaml cho angular) để có biên độ dự phòng, tránh vượt
-    # quá [-1,1] khi robot vượt nhẹ trần do quán tính/overshoot tức thời.
+    # Previous 54 channels retain their order. The final two are computed
+    # solely from front LaserScan, odometry and applied SpeedLimit, all of
+    # which are available through the same path during training and deploy.
+    OBSERVATION_DIM = 56
+    OBSERVATION_DIM_NO_TTC = 31
+    MAX_HAZARD_PERSISTENCE = 5.0
+    # Normalization ceilings leave headroom for transient odometry overshoot.
     MAX_EXPECTED_LINEAR_VELOCITY = 1.2
     MAX_EXPECTED_ANGULAR_VELOCITY = 1.0
 
-    # [GROUP2] Trọng số phạt cho việc thay đổi action ĐỘT NGỘT giữa 2 step
-    # liên tiếp. Tính trên khoảng cách ĐÃ CHUẨN HOÁ theo biên độ mỗi chiều
-    # (ACTION_HIGH - ACTION_LOW), vì các chiều action có thang đo rất khác
-    # nhau (vx_max range ~0.95, goal_weight range ~20) — nếu không chuẩn
-    # hoá, chiều có range lớn sẽ áp đảo hoàn toàn phép phạt.
+    # Penalize abrupt changes in the scale actually applied by the supervisor.
     ACTION_SMOOTHNESS_PENALTY_WEIGHT = 0.1
 
     # [PATCH] Nếu True: chỉ tính episode là "thành công" khi đã tới >=1 goal
@@ -712,7 +1059,13 @@ class AgvRlEnv(gym.Env):
         goal: Goal = (9.5, 0.0, 0.0),
         goals: Optional[Sequence[Goal]] = None,
         goal_sampling: str = "random_costmap",
-        max_episode_steps: int = 35,
+        max_episode_steps: int = 180,
+        dynamic_obstacles: bool = False,
+        dynamic_obstacle_probability: float = 0.75,
+        require_front_safety_stop: bool = False,
+        include_ttc: bool = True,
+        conservative_crossing: bool = False,
+        retain_dynamic_obstacle_after_crossing: bool = False,
     ) -> None:
         super().__init__()
 
@@ -730,6 +1083,8 @@ class AgvRlEnv(gym.Env):
             )
         if max_episode_steps <= 0:
             raise ValueError("max_episode_steps must be positive")
+        if not 0.0 <= dynamic_obstacle_probability <= 1.0:
+            raise ValueError("dynamic_obstacle_probability must be in [0, 1]")
 
         candidate_goals = tuple(goals) if goals is not None else (goal,)
         if not candidate_goals:
@@ -745,7 +1100,13 @@ class AgvRlEnv(gym.Env):
 
         if not rclpy.ok():
             rclpy.init()
-        self.ros = AgvRosInterface()
+        if retain_dynamic_obstacle_after_crossing and not conservative_crossing:
+            raise ValueError(
+                "retained crossing obstacle requires conservative_crossing"
+            )
+        self.ros = AgvRosInterface(
+            retain_dynamic_obstacle_after_crossing=retain_dynamic_obstacle_after_crossing
+        )
         self.executor = MultiThreadedExecutor(num_threads=4)
         self.executor.add_node(self.ros)
         self.spin_thread = threading.Thread(
@@ -760,6 +1121,38 @@ class AgvRlEnv(gym.Env):
         self.goal = self.goals[0]
         self.max_episode_steps = int(max_episode_steps)
         self.episode_step_count = 0
+        self.dynamic_obstacles = bool(dynamic_obstacles)
+        self.dynamic_obstacle_probability = float(dynamic_obstacle_probability)
+        self.include_ttc = bool(include_ttc)
+        self.conservative_crossing = bool(conservative_crossing)
+        self.retain_dynamic_obstacle_after_crossing = bool(
+            retain_dynamic_obstacle_after_crossing
+        )
+        # This experimental arm keeps the obstacle after crossing, so a
+        # no-progress episode must not soft-reset at the same blocked pose.
+        self.enable_motion_stall_recovery = self.retain_dynamic_obstacle_after_crossing
+        if self.conservative_crossing and (self.include_ttc or not self.dynamic_obstacles):
+            raise ValueError("conservative_crossing requires no-TTC dynamic-obstacle training")
+        self.contract_version = (
+            self.CONTRACT_VERSION if self.include_ttc else self.CONTRACT_VERSION_NO_TTC
+        )
+        if self.retain_dynamic_obstacle_after_crossing:
+            self.reward_contract_version = (
+                self.REWARD_CONTRACT_VERSION_CONSERVATIVE_RETAINED
+            )
+        elif self.conservative_crossing:
+            self.reward_contract_version = self.REWARD_CONTRACT_VERSION_CONSERVATIVE
+        elif self.include_ttc:
+            self.reward_contract_version = self.REWARD_CONTRACT_VERSION
+        else:
+            self.reward_contract_version = self.REWARD_CONTRACT_VERSION_NO_TTC
+        self.observation_dim = (
+            self.OBSERVATION_DIM if self.include_ttc else self.OBSERVATION_DIM_NO_TTC
+        )
+        self.next_dynamic_obstacle_step = 1
+        self.safety_deadlock_steps = 0
+        self.safety_deadlock_history = deque(maxlen=self.SAFETY_DEADLOCK_STEPS)
+        self.motion_stall_history = deque(maxlen=self.MOTION_STALL_STEPS)
         self.previous_distance = 0.0
         self.closed = False
 
@@ -783,11 +1176,21 @@ class AgvRlEnv(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(self.OBSERVATION_DIM,),
+            shape=(self.observation_dim,),
             dtype=np.float32,
         )
         try:
             self.ros.wait_until_ready()
+            if require_front_safety_stop and not self.ros.front_safety_stop_ready.wait(timeout=5.0):
+                raise RuntimeError(
+                    "No /sim_front_safety_stop status: restart the Phase-2 "
+                    "MuJoCo launch with enable_rl_supervisor:=true"
+                )
+            if require_front_safety_stop and not self.ros.front_safety_diagnostics_ready.wait(timeout=5.0):
+                raise RuntimeError(
+                    "No current /sim_front_safety_diagnostics status: restart "
+                    "the Phase-2 MuJoCo launch after rebuilding"
+                )
         except Exception:
             self.close()
             raise
@@ -804,6 +1207,91 @@ class AgvRlEnv(gym.Env):
         else:  # random_list
             index = int(self.np_random.integers(len(self.goals)))
             self.goal = self.goals[index]
+
+    def _send_selected_goal(self) -> None:
+        """Retry explicit Nav2 rejections without hiding transport/timeouts."""
+        attempts = 5
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            try:
+                self.ros.send_navigation_goal(*self.goal)
+                return
+            except NavigationGoalRejected as exc:
+                last_error = exc
+                print(
+                    f"[Goal] Nav2 từ chối lần {attempt}/{attempts}: {exc}",
+                    flush=True,
+                )
+                if attempt == attempts:
+                    break
+                time.sleep(0.5)
+                if self.goal_sampling in ("random_costmap", "random_list"):
+                    self._select_next_goal()
+        raise NavigationGoalRejected(
+            f"Nav2 rejected {attempts} consecutive goals; check bt_navigator "
+            "lifecycle and the sampled goal locations"
+        ) from last_error
+
+    def _maybe_start_training_obstacle(self) -> None:
+        """Place a lateral crossing far enough ahead to permit slowing/avoidance.
+
+        A head-on diagonal approach proved unsuitable for the 1D speed-limit
+        policy: the obstacle could enter the robot footprint even at minimum
+        commanded speed. Keep longitudinal position fixed in this first
+        dynamic curriculum and let Nav2 steer around the crossing.
+        """
+        if not self.dynamic_obstacles or self.episode_step_count < self.next_dynamic_obstacle_step:
+            return
+        self.next_dynamic_obstacle_step = self.episode_step_count + 20
+        if (
+            self.ros.current_state()["dynamic_obstacle_active"]
+            or getattr(self.ros, "dynamic_obstacle_parked_after_crossing", False)
+        ):
+            return
+        if self.np_random.random() >= self.dynamic_obstacle_probability:
+            return
+        try:
+            robot_x, robot_y, yaw = self.ros.get_map_pose()
+        except Exception as exc:
+            print(f"[Dynamic obstacle] No robot pose: {exc!r}", flush=True)
+            return
+        cosine, sine = math.cos(yaw), math.sin(yaw)
+
+        def to_world(forward: float, lateral: float) -> Tuple[float, float]:
+            return (
+                robot_x + cosine * forward - sine * lateral,
+                robot_y + sine * forward + cosine * lateral,
+            )
+
+        for _ in range(16):
+            side = -1.0 if self.np_random.random() < 0.5 else 1.0
+            if getattr(self, "conservative_crossing", False):
+                forward = float(self.np_random.uniform(1.7, 2.8))
+                lateral = float(self.np_random.uniform(1.0, 1.5))
+                speed = float(self.np_random.uniform(0.25, 0.55))
+            else:
+                forward = float(self.np_random.uniform(3.2, 3.8))
+                lateral = 1.5
+                speed = float(self.np_random.uniform(0.45, 0.60))
+            start = to_world(forward, side * lateral)
+            end = to_world(forward, -side * lateral)
+            # Avoid teleporting the obstacle into known static geometry.
+            if not all(
+                self.ros.is_position_free(
+                    start[0] + alpha * (end[0] - start[0]),
+                    start[1] + alpha * (end[1] - start[1]),
+                )
+                for alpha in np.linspace(0.0, 1.0, 7)
+            ):
+                continue
+            self.ros.start_dynamic_obstacle(start, end, speed)
+            print(
+                f"[Dynamic obstacle] start={start} end={end} speed={speed:.2f} m/s",
+                flush=True,
+            )
+            return
+        self.next_dynamic_obstacle_step = self.episode_step_count + 5
+        print("[Dynamic obstacle] No free front crossing; retrying later", flush=True)
 
     def _generate_new_goal(self) -> None:
         """Sinh đích đến ngẫu nhiên trên toàn bản đồ, đảm bảo không chạm vật cản."""
@@ -832,7 +1320,9 @@ class AgvRlEnv(gym.Env):
                 if math.hypot(cand_x - robot_x, cand_y - robot_y) < self.min_goal_distance:
                     continue
 
-                if self.ros.is_position_free(cand_x, cand_y):
+                if self.ros.is_position_free(
+                    cand_x, cand_y, self.GOAL_CLEARANCE_M
+                ):
                     self.goal = (cand_x, cand_y, 0.0)
                     print(f"[Goal] Đã sinh đích toàn map thành công: ({cand_x:.2f}, {cand_y:.2f})")
                     return
@@ -847,20 +1337,27 @@ class AgvRlEnv(gym.Env):
 
                 cand_x = robot_x + dx
                 cand_y = robot_y + dy
-                if self.ros.is_position_free(cand_x, cand_y):
+                if self.ros.is_position_free(
+                    cand_x, cand_y, self.GOAL_CLEARANCE_M
+                ):
                     self.goal = (cand_x, cand_y, 0.0)
                     return
 
         for ang in np.linspace(0, 2 * math.pi, 8, endpoint=False):
             cand_x = float(robot_x + self.min_goal_distance * math.cos(ang))
             cand_y = float(robot_y + self.min_goal_distance * math.sin(ang))
-            if self.ros.is_position_free(cand_x, cand_y):
+            if self.ros.is_position_free(
+                cand_x, cand_y, self.GOAL_CLEARANCE_M
+            ):
                 self.goal = (cand_x, cand_y, 0.0)
                 return
 
-        self.goal = (float(robot_x + self.min_goal_distance), float(robot_y), 0.0)
+        raise RuntimeError(
+            "Không tìm được goal có đủ khoảng hở trên global costmap; "
+            "giữ nguyên goal cũ và dừng fail-closed"
+        )
 
-    def _pose_and_distance(self) -> Tuple[float, float, float, float]:
+    def _pose_and_distance(self) -> Tuple[float, float, float, float, float]:
         x, y, yaw = self.ros.get_map_pose()
         dx = self.goal[0] - x
         dy = self.goal[1] - y
@@ -877,22 +1374,105 @@ class AgvRlEnv(gym.Env):
         # lại quan hệ này riêng cho từng hướng quay có thể -> tốn dữ liệu
         # hơn nhiều, khó tổng quát hoá.
         relative_bearing = normalize_angle(global_bearing - yaw)
-        return x, y, distance, relative_bearing
+        return x, y, yaw, distance, relative_bearing
+
+    @classmethod
+    def _front_risk_features(cls, state: Dict[str, Any]) -> Tuple[float, float, float]:
+        """Return clearance, signed braking margin and proactive risk.
+
+        This is a conservative *proxy*, not the state of the simulation-only
+        front gate. Invalid/unknown front scans fail closed. The reserve is
+        always included so risk appears before the physical gate latches.
+        """
+        if (
+            not state["front_scan_valid"]
+            or not math.isfinite(float(state.get("front_scan_age_s", math.inf)))
+            or float(state.get("front_scan_age_s", math.inf))
+            > cls.FRONT_RISK_SCAN_TIMEOUT_S
+        ):
+            return 0.0, -cls.FRONT_RISK_MARGIN_NORM_M, 1.0
+        x = np.asarray(state["front_scan_x"], dtype=np.float32)
+        y = np.asarray(state["front_scan_y"], dtype=np.float32)
+        if x.shape != y.shape or not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
+            return 0.0, -cls.FRONT_RISK_MARGIN_NORM_M, 1.0
+        measured_vx = float(state["linear_velocity"])
+        applied_scale = float(state["applied_speed_scale"])
+        if not math.isfinite(measured_vx) or not math.isfinite(applied_scale):
+            return 0.0, -cls.FRONT_RISK_MARGIN_NORM_M, 1.0
+        v_ref = max(
+            0.0,
+            measured_vx,
+            cls.FRONT_RISK_NOMINAL_VX_M_S * float(np.clip(applied_scale, 0.15, 1.0)),
+        )
+        half_width = cls.FRONT_RISK_CORRIDOR_HALF_WIDTH_M + cls.FRONT_RISK_REACTION_S * v_ref
+        corridor = (x > 0.0) & (np.abs(y) <= half_width)
+        clearance = float(np.min(x[corridor])) if np.any(corridor) else cls.MAX_SCAN_RANGE
+        brake_distance = (
+            cls.FRONT_RISK_CLEARANCE_M
+            + cls.FRONT_RISK_REACTION_S * v_ref
+            + v_ref * v_ref / (2.0 * cls.FRONT_RISK_DECELERATION_M_S2)
+            + cls.FRONT_RISK_RELEASE_RESERVE_M
+        )
+        margin = clearance - brake_distance
+        risk = float(np.clip(
+            (cls.FRONT_RISK_LOOKAHEAD_M - margin) / cls.FRONT_RISK_LOOKAHEAD_M,
+            0.0, 1.0,
+        ))
+        return clearance, margin, risk
+
+    @classmethod
+    def _conservative_lateral_risk(cls, state: Dict[str, Any]) -> float:
+        """Current-scan risk for an object ahead and to either side.
+
+        This deliberately does not infer motion: a static object in the same
+        location receives the same risk. The benchmark measures that cost.
+        """
+        scan_age = float(state.get("front_scan_age_s", math.inf))
+        if (
+            not state["front_scan_valid"]
+            or not math.isfinite(scan_age)
+            or scan_age > cls.FRONT_RISK_SCAN_TIMEOUT_S
+        ):
+            return 0.0
+        x = np.asarray(state["front_scan_x"], dtype=np.float32)
+        y = np.asarray(state["front_scan_y"], dtype=np.float32)
+        if x.shape != y.shape or not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
+            return 0.0
+        mask = (
+            (x >= cls.CONSERVATIVE_LATERAL_MIN_X_M)
+            & (x <= cls.CONSERVATIVE_LATERAL_MAX_X_M)
+            & (np.abs(y) >= cls.CONSERVATIVE_LATERAL_MIN_Y_M)
+            & (np.abs(y) <= cls.CONSERVATIVE_LATERAL_MAX_Y_M)
+        )
+        if np.count_nonzero(mask) < 3:
+            return 0.0
+        nearest_x = float(np.min(x[mask]))
+        return float(np.clip(
+            (cls.CONSERVATIVE_LATERAL_MAX_X_M - nearest_x)
+            / (cls.CONSERVATIVE_LATERAL_MAX_X_M - cls.CONSERVATIVE_LATERAL_MIN_X_M),
+            0.0, 1.0,
+        ))
 
     def _observation(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         state = self.ros.current_state()
-        x, y, distance, relative_bearing = self._pose_and_distance()
+        front_clearance, front_margin, front_risk = self._front_risk_features(state)
+        lateral_risk = (
+            self._conservative_lateral_risk(state)
+            if getattr(self, "conservative_crossing", False) else 0.0
+        )
+        x, y, yaw, distance, relative_bearing = self._pose_and_distance()
         scan_normalized = np.clip(
             state["lidar"] / self.MAX_SCAN_RANGE,
             0.0,
             1.0,
         )
+        include_ttc = getattr(self, "include_ttc", True)
+        ttc_normalized = (
+            np.clip(state["sector_ttc"] / self.ros.TTC_MAX, 0.0, 1.0)
+            if include_ttc else np.empty(0, dtype=np.float32)
+        )
 
-        # [GROUP1] Thêm vận tốc thật (linear + angular) vào observation.
-        # Trước đây policy hoàn toàn "mù" về tốc độ hiện tại của chính nó —
-        # chỉ biết lidar + vị trí goal, không biết bản thân đang đi nhanh
-        # hay chậm. Thiếu thông tin này khiến policy khó học các quyết
-        # định phụ thuộc vào trạng thái động lực học hiện tại.
+        # Measured velocity is required to interpret closing risk and braking.
         linear_velocity_norm = float(
             np.clip(
                 state["linear_velocity"] / self.MAX_EXPECTED_LINEAR_VELOCITY,
@@ -911,6 +1491,7 @@ class AgvRlEnv(gym.Env):
         observation = np.concatenate(
             (
                 scan_normalized,
+                ttc_normalized,
                 np.asarray(
                     [
                         np.clip(
@@ -925,12 +1506,26 @@ class AgvRlEnv(gym.Env):
                         ),
                         linear_velocity_norm,
                         angular_velocity_norm,
+                        np.clip(state["applied_speed_scale"], 0.0, 1.0),
+                        *(
+                            [np.clip(
+                                state["hazard_persistence"]
+                                / self.MAX_HAZARD_PERSISTENCE,
+                                0.0,
+                                1.0,
+                            )] if include_ttc else []
+                        ),
+                        np.clip(front_clearance / self.MAX_SCAN_RANGE, 0.0, 1.0),
+                        np.clip(front_margin / self.FRONT_RISK_MARGIN_NORM_M, -1.0, 1.0),
                     ],
                     dtype=np.float32,
                 ),
             )
         ).astype(np.float32)
-        if observation.shape != (self.OBSERVATION_DIM,) or not np.all(
+        expected_dim = (
+            self.OBSERVATION_DIM if include_ttc else self.OBSERVATION_DIM_NO_TTC
+        )
+        if observation.shape != (expected_dim,) or not np.all(
             np.isfinite(observation)
         ):
             raise RuntimeError(
@@ -939,6 +1534,7 @@ class AgvRlEnv(gym.Env):
         info = {
             "x": x,
             "y": y,
+            "yaw": yaw,
             "goal": list(self.goal),
             "distance_to_goal": distance,
             # [GROUP1] đổi tên field cho đúng bản chất (trước là
@@ -946,12 +1542,41 @@ class AgvRlEnv(gym.Env):
             "relative_goal_bearing": relative_bearing,
             "linear_velocity": state["linear_velocity"],
             "angular_velocity": state["angular_velocity"],
+            "cmd_vx_m_s": state.get("cmd_vx_m_s", math.nan),
+            "cmd_wz_rad_s": state.get("cmd_wz_rad_s", math.nan),
+            "cmd_vel_age_s": state.get("cmd_vel_age_s", math.inf),
+            "applied_speed_scale": state["applied_speed_scale"],
+            "safety_override_active": state["safety_override_active"],
+            "front_safety_stop_active": state["front_safety_stop_active"],
+            "front_safety_stop_events": state["front_safety_stop_events"],
+            "front_safety_stop_reason": state["front_safety_stop_reason"],
+            "front_safety_stop_clearance_m": state["front_safety_stop_clearance_m"],
+            "front_safety_stop_distance_m": state["front_safety_stop_distance_m"],
+            "supervisor_min_ttc": state["supervisor_min_ttc"],
+            "min_sector_ttc": float(np.min(state["sector_ttc"])),
+            "min_sector_ttc_episode": state["min_sector_ttc_episode"],
+            "dynamic_obstacle_spawns": state["dynamic_obstacle_spawns"],
+            "dynamic_obstacle_active": state["dynamic_obstacle_active"],
+            "dynamic_obstacle_position": state.get(
+                "dynamic_obstacle_position", [20.0, 20.0, 0.5]
+            ),
+            "dynamic_obstacle_parked_after_crossing": state.get(
+                "dynamic_obstacle_parked_after_crossing", False
+            ),
+            "hazard_persistence": state["hazard_persistence"],
             "min_lidar": float(np.min(state["lidar"])),
+            "front_corridor_clearance_m": front_clearance,
+            "conservative_lateral_risk": lateral_risk,
+            "front_braking_margin_m": front_margin,
+            "front_proactive_risk": front_risk,
+            "front_scan_valid": bool(state["front_scan_valid"]),
             "min_lidar_episode": float(state["minimum_lidar"]),
             "min_lidar_step": float(state["minimum_lidar_step"]),
             "contact_count": int(state["contact_count"]),
             "collision_state": bool(state["collision"]),
             "collision_event_count": int(state["collision_event_count"]),
+            "collision_event_detail_count": len(state["collision_events"]),
+            "collision_events": state["collision_events"],
             "nav_status": state["nav_status"],
             "goals_reached_this_episode": self.goals_reached_this_episode,
         }
@@ -959,17 +1584,14 @@ class AgvRlEnv(gym.Env):
 
     def _apply_action(self, action: np.ndarray) -> np.ndarray:
         array = np.asarray(action, dtype=np.float32)
-        if array.shape != (4,):
-            raise ValueError(f"action must have shape (4,), got {array.shape}")
+        if array.shape != (1,):
+            raise ValueError(f"action must have shape (1,), got {array.shape}")
         if not np.all(np.isfinite(array)):
             raise ValueError("action contains NaN or Inf")
         clipped = np.clip(array, self.ACTION_LOW, self.ACTION_HIGH)
-        applied = np.asarray(
-            [round(float(value), 2) for value in clipped],
-            dtype=np.float32,
-        )
-        self.ros.set_mppi_parameters(*[float(value) for value in applied])
-        return applied
+        requested = np.asarray([float(clipped[0])], dtype=np.float32)
+        self.ros.publish_speed_scale(float(requested[0]))
+        return requested
 
     def _perform_hard_reset(self) -> None:
         """[PATCH] Thực hiện chuỗi hard-reset (về 0,0,0) với cơ chế thử lại.
@@ -1028,9 +1650,11 @@ class AgvRlEnv(gym.Env):
     ):
         super().reset(seed=seed)
 
+        self.ros.park_dynamic_obstacle()
         self.ros.cancel_navigation()
 
-        if self._needs_hard_reset:
+        performed_hard_reset = self._needs_hard_reset
+        if performed_hard_reset:
             # [PATCH] Gọi qua hàm có retry thay vì gọi trực tiếp inline.
             self._perform_hard_reset()
             self._needs_hard_reset = False
@@ -1071,31 +1695,105 @@ class AgvRlEnv(gym.Env):
             raise TimeoutError("No fresh sensors after randomization")
         self.ros.reset_episode_flags()
         self.ros.clear_costmaps(timeout=10.0)
-        # [GROUP2] Lưu lại action nominal vừa áp dụng làm MỐC KHỞI ĐẦU cho
-        # phép tính phạt thay đổi đột ngột — để step() đầu tiên của episode
-        # vẫn được đánh giá đúng mức thay đổi so với trạng thái reset, thay
-        # vì bỏ qua hoàn toàn (previous_applied_action=None chỉ xảy ra ở
-        # episode/tiến trình đầu tiên trước reset() lần đầu).
-        self.previous_applied_action = self._apply_action(
-            self.SOURCE_NOMINAL_ACTION
-        ).copy()
+        # A soft reset preserves pose, so forcing scale=1.0 near an obstacle
+        # can recreate the latch that ended the previous episode. Only request
+        # the nominal envelope after a hard reset to the known-clear origin.
+        if performed_hard_reset:
+            self._apply_action(self.SOURCE_NOMINAL_ACTION)
+        # Smoothness is defined against the supervisor acknowledgement, not
+        # the asynchronous request just published above.
+        applied_scale = float(self.ros.current_state()["applied_speed_scale"])
+        self.previous_applied_action = np.asarray(
+            [applied_scale], dtype=np.float32
+        )
 
         # Select according to the configured mode; default is whole-map sampling.
         self.goals_reached_this_episode = 0
         self._select_next_goal()
-        self.ros.send_navigation_goal(*self.goal)
+        self._send_selected_goal()
 
         observation, info = self._observation()
         self.previous_distance = float(info["distance_to_goal"])
         self.episode_step_count = 0
+        self.next_dynamic_obstacle_step = 1
+        self.safety_deadlock_steps = 0
+        self.safety_deadlock_history.clear()
+        if getattr(self, "enable_motion_stall_recovery", False):
+            self.motion_stall_history.clear()
         info["reset_ok"] = True
         info["domain_randomization"] = response.message
         return observation, info
 
+    def _update_safety_deadlock(self, info: Dict[str, Any], goal_event: Optional[str]) -> bool:
+        """Detect near-zero motion with frequent corridor stops over 20 s."""
+        if goal_event == "succeeded":
+            self.safety_deadlock_history.clear()
+            self.safety_deadlock_steps = 0
+            return False
+        blocked = (
+            bool(info["front_safety_stop_active"])
+            and (int(info["front_safety_stop_reason"]) & 2) != 0
+        )
+        self.safety_deadlock_history.append((
+            float(info["x"]),
+            float(info["y"]),
+            float(info["yaw"]),
+            blocked,
+        ))
+        history = self.safety_deadlock_history
+        self.safety_deadlock_steps = sum(sample[3] for sample in history)
+        if (
+            not blocked
+            or len(history) < self.SAFETY_DEADLOCK_STEPS
+            or self.safety_deadlock_steps < self.SAFETY_DEADLOCK_MIN_BLOCKED_STEPS
+        ):
+            return False
+        origin_x, origin_y, origin_yaw, _ = history[0]
+        return all(
+            math.hypot(x - origin_x, y - origin_y)
+            <= self.SAFETY_DEADLOCK_MAX_DISPLACEMENT_M
+            and abs(normalize_angle(yaw - origin_yaw))
+            <= self.SAFETY_DEADLOCK_MAX_YAW_RAD
+            for x, y, yaw, _ in history
+        )
+
+    def _update_motion_stall(self, info: Dict[str, Any], goal_event: Optional[str]) -> Optional[str]:
+        """Classify no-translation episodes without conflating spin and stale cmd."""
+        if not getattr(self, "enable_motion_stall_recovery", False):
+            return None
+        history = self.motion_stall_history
+        if goal_event == "succeeded":
+            history.clear()
+            return None
+        history.append((
+            float(info["x"]), float(info["y"]), float(info["yaw"]),
+            float(info.get("cmd_vel_age_s", 0.0)),
+        ))
+        if len(history) < self.MOTION_STALL_STEPS:
+            return None
+        origin_x, origin_y = history[0][:2]
+        stationary = all(
+            math.hypot(x - origin_x, y - origin_y)
+            <= self.MOTION_STALL_MAX_DISPLACEMENT_M
+            for x, y, _, _ in history
+        )
+        if not stationary:
+            return None
+        yaw_travel = sum(
+            abs(normalize_angle(current[2] - previous[2]))
+            for previous, current in zip(history, list(history)[1:])
+        )
+        if yaw_travel >= math.radians(30.0):
+            return "rotation_stall"
+        if all(sample[3] >= 1.0 for sample in list(history)[-3:]):
+            return "command_stall"
+        return "motion_stall"
+
     def step(self, action):
         self.episode_step_count += 1
+        self._maybe_start_training_obstacle()
         self.ros.begin_action_interval()
-        applied = self._apply_action(action)
+        requested = self._apply_action(action)
         self.ros.wait_for_sim_duration(self.STEP_WAIT_DURATION)
 
         observation, info = self._observation()
@@ -1105,11 +1803,20 @@ class AgvRlEnv(gym.Env):
         minimum_obstacle_distance = float(info["min_lidar_step"])
         progress = self.previous_distance - distance
 
+        # Preserve the dense-reward objective per unit of simulated time when
+        # moving from the old 5.05 s decision interval to 1 Hz.  Progress and
+        # terminal/event rewards are already independent of the sampling rate.
+        dense_reward_scale = (
+            self.STEP_WAIT_DURATION / self.DENSE_REWARD_REFERENCE_SECONDS
+        )
         reward_progress = 15.0 * progress
         reward_safety = 0.0
         reward_speed = 0.0
-        reward_step = -0.05
+        reward_step = -0.05 * dense_reward_scale
         reward_goal = 0.0
+        reward_front_stop = 0.0
+        reward_front_risk = 0.0
+        reward_lateral_risk = 0.0
         terminated = False
         truncated = False
         reason = ""
@@ -1136,7 +1843,7 @@ class AgvRlEnv(gym.Env):
             )
 
         elif minimum_obstacle_distance <= self.SAFE_DISTANCE:
-            reward_safety = max(
+            reward_safety = dense_reward_scale * max(
                 -5.0
                 * (
                     self.SAFE_DISTANCE
@@ -1146,34 +1853,69 @@ class AgvRlEnv(gym.Env):
                 self.SAFETY_REWARD_CLIP,
             )
         else:
-            # [GROUP2] Dùng VẬN TỐC THẬT đo được từ /odometry/filtered,
-            # KHÔNG dùng applied[0] (chỉ là TRẦN vx_max mà RL vừa đặt cho
-            # MPPI). Trước đây agent được thưởng ngay khi ĐẶT trần cao, bất
-            # kể robot có thực sự đạt tới tốc độ đó hay không — đây chính
-            # là kẽ hở "reward hacking" khớp với hiện tượng quan sát được:
-            # model luôn đẩy vx_max lên gần 1.0 (test bằng predict
-            # deterministic) nhưng tốc độ THẬT của robot chỉ loanh quanh
-            # 0.5 m/s. Đổi sang dùng vận tốc thật buộc agent phải học cách
-            # đặt tham số sao cho robot THỰC SỰ tăng tốc được, không chỉ
-            # "hô khẩu hiệu" qua con số vx_max. Clip >=0 vì lùi (vận tốc
-            # âm) không nên được thưởng như đi nhanh.
-            reward_speed = 2.0 * max(0.0, float(info["linear_velocity"]))
+            # Reward measured motion, never the requested/applied limit itself;
+            # otherwise the policy can earn reward merely by asking for 1.0.
+            # Reverse motion is not counted as forward-speed reward.
+            reward_speed = (
+                dense_reward_scale
+                * 2.0
+                * max(0.0, float(info["linear_velocity"]))
+            )
 
-        # [GROUP2] Phạt action thay đổi ĐỘT NGỘT giữa 2 step liên tiếp —
-        # chuẩn hoá theo biên độ (ACTION_HIGH - ACTION_LOW) của TỪNG chiều
-        # trước khi tính, vì các chiều action có thang đo rất khác nhau
-        # (vx_max range ~0.95 so với goal_weight range ~20) — nếu không
-        # chuẩn hoá, phép phạt sẽ hoàn toàn bị chi phối bởi chiều có range
-        # lớn nhất, bỏ qua các chiều còn lại.
+        # A high requested speed can keep the independent front gate latched
+        # while the robot is stationary. Lower SpeedLimit requests can release
+        # it without relaxing the physical stop threshold.
+        if (
+            info["front_safety_stop_active"]
+            and (int(info["front_safety_stop_reason"]) & 2) != 0
+        ):
+            reward_front_stop = (
+                -dense_reward_scale
+                * self.FRONT_STOP_REQUEST_PENALTY_WEIGHT
+                * float(requested[0])
+            )
+
+        # Penalize a high request *before* the independent gate closes. Risk
+        # comes only from front scan/odom/applied envelope, so this signal is
+        # defined on both simulator and robot. At 1 Hz it is bounded by -1
+        # per step, compared with +100 per reached goal and -30 per deadlock.
+        request_fraction = float(np.clip(
+            (float(requested[0]) - float(self.ACTION_LOW[0]))
+            / float(self.ACTION_HIGH[0] - self.ACTION_LOW[0]),
+            0.0, 1.0,
+        ))
+        reward_front_risk = (
+            -self.FRONT_RISK_PENALTY_WEIGHT
+            * float(info.get("front_proactive_risk", 0.0))
+            * request_fraction
+        )
+        if getattr(self, "conservative_crossing", False):
+            reward_lateral_risk = (
+                -self.CONSERVATIVE_LATERAL_REWARD_WEIGHT
+                * float(info["conservative_lateral_risk"])
+                * request_fraction
+            )
+
+        # Penalize changes in the scale Nav2 actually received, not merely
+        # changes in the raw policy request (the supervisor may smooth or
+        # override that request).
+        actual_applied = np.asarray(
+            [float(info["applied_speed_scale"])],
+            dtype=np.float32,
+        )
         if self.previous_applied_action is not None:
             action_range = self.ACTION_HIGH - self.ACTION_LOW
-            normalized_delta = (applied - self.previous_applied_action) / action_range
-            reward_smoothness = -self.ACTION_SMOOTHNESS_PENALTY_WEIGHT * float(
-                np.sum(normalized_delta ** 2)
+            normalized_delta = (
+                actual_applied - self.previous_applied_action
+            ) / action_range
+            reward_smoothness = (
+                -dense_reward_scale
+                * self.ACTION_SMOOTHNESS_PENALTY_WEIGHT
+                * float(np.sum(normalized_delta ** 2))
             )
         else:
             reward_smoothness = 0.0
-        self.previous_applied_action = applied.copy()
+        self.previous_applied_action = actual_applied
 
         # Rewards describe the action interval against the old goal. Keep
         # that context separate from the next state after a goal handover.
@@ -1186,8 +1928,10 @@ class AgvRlEnv(gym.Env):
             self.goals_reached_this_episode += 1
             print(f"✅ ĐÃ TỚI ĐÍCH! (Tổng: {self.goals_reached_this_episode}) -> Đang sinh goal mới...")
 
+            if getattr(self, "retain_dynamic_obstacle_after_crossing", False):
+                self.ros.park_dynamic_obstacle()
             self._select_next_goal()
-            self.ros.send_navigation_goal(*self.goal)
+            self._send_selected_goal()
 
             goal_event = "succeeded"
             reason = "success_but_continue"
@@ -1196,8 +1940,10 @@ class AgvRlEnv(gym.Env):
             reward_goal = self.NAV_ABORT_REWARD
             print("⚠️ NAV2 BỊ KẸT (ABORTED) -> Đang sinh goal mới...")
 
+            if getattr(self, "retain_dynamic_obstacle_after_crossing", False):
+                self.ros.park_dynamic_obstacle()
             self._select_next_goal()
-            self.ros.send_navigation_goal(*self.goal)
+            self._send_selected_goal()
 
             goal_event = "aborted"
             reason = "aborted_but_continue"
@@ -1219,9 +1965,45 @@ class AgvRlEnv(gym.Env):
             }
         )
 
-        if not terminated and self.episode_step_count >= self.max_episode_steps:
+        if not terminated and self._update_safety_deadlock(info, goal_event):
+            terminated = True
+            reason = "safety_deadlock"
+            reward_goal = self.NAV_ABORT_REWARD
+            self._needs_hard_reset = True
+            print(
+                "[Safety deadlock] Front corridor stop during "
+                f"{self.safety_deadlock_steps}/{self.SAFETY_DEADLOCK_STEPS} "
+                "recent steps with no meaningful movement at "
+                f"({info['x']:.2f}, {info['y']:.2f}); "
+                f"clearance={info['front_safety_stop_clearance_m']:.2f} m, "
+                f"stop_distance={info['front_safety_stop_distance_m']:.2f} m, "
+                f"dynamic_active={info['dynamic_obstacle_active']}; "
+                "hard reset next episode",
+                flush=True,
+            )
+        stall_reason = (
+            self._update_motion_stall(info, goal_event) if not terminated else None
+        )
+        if stall_reason is not None:
+            truncated = True
+            reason = stall_reason
+            self._needs_hard_reset = True
+            print(
+                f"[{stall_reason}] No displacement >"
+                f"{self.MOTION_STALL_MAX_DISPLACEMENT_M:.2f} m over "
+                f"{self.MOTION_STALL_STEPS} steps at "
+                f"({info['x']:.2f}, {info['y']:.2f}); hard reset next episode",
+                flush=True,
+            )
+        if not terminated and not truncated and self.episode_step_count >= self.max_episode_steps:
             truncated = True
             reason = "max_steps"
+            if self.goals_reached_this_episode == 0:
+                self._needs_hard_reset = True
+                print(
+                    "[Max steps] No goal reached; hard reset next episode",
+                    flush=True,
+                )
 
         reward = (
             reward_progress
@@ -1229,6 +2011,9 @@ class AgvRlEnv(gym.Env):
             + reward_speed
             + reward_step
             + reward_goal
+            + reward_front_stop
+            + reward_front_risk
+            + reward_lateral_risk
             + reward_smoothness
         )
         self.previous_distance = distance
@@ -1245,10 +2030,13 @@ class AgvRlEnv(gym.Env):
         # "đã từng chạm goal".
         if terminated or truncated:
             reached_at_least_one_goal = self.goals_reached_this_episode > 0
-            ended_in_collision = reason == "collision"
+            ended_in_failure = reason in (
+                "collision", "safety_deadlock", "motion_stall",
+                "rotation_stall", "command_stall"
+            )
             if self.SUCCESS_REQUIRES_NO_COLLISION:
                 info["is_success"] = (
-                    reached_at_least_one_goal and not ended_in_collision
+                    reached_at_least_one_goal and not ended_in_failure
                 )
             else:
                 info["is_success"] = reached_at_least_one_goal
@@ -1257,7 +2045,8 @@ class AgvRlEnv(gym.Env):
             {
                 "termination_reason": reason,
                 "progress": progress,
-                "applied_action": [float(value) for value in applied],
+                "requested_action": [float(value) for value in requested],
+                "applied_speed_scale": float(info["applied_speed_scale"]),
                 "physical_collision": physical_collision,
                 "lidar_collision": lidar_collision,
                 "contact_collision": contact_collision,  # [PATCH] để debug/log riêng nguồn này
@@ -1266,6 +2055,12 @@ class AgvRlEnv(gym.Env):
                 "reward_speed": reward_speed,
                 "reward_smoothness": reward_smoothness,  # [GROUP2] để debug/log riêng
                 "reward_goal": reward_goal,
+                "reward_front_stop": reward_front_stop,
+                "reward_front_risk": reward_front_risk,
+                "reward_lateral_risk": reward_lateral_risk,
+                "goals_reached_this_episode": self.goals_reached_this_episode,
+                "safety_deadlock_steps": self.safety_deadlock_steps,
+                "hard_reset_next_episode": self._needs_hard_reset,
             }
         )
         return observation, float(reward), terminated, truncated, info
@@ -1276,9 +2071,8 @@ class AgvRlEnv(gym.Env):
         self.closed = True
         try:
             self.ros.cancel_navigation()
-            self.ros.set_mppi_parameters(
-                *[float(value) for value in self.NATIVE_MUJOCO_ACTION]
-            )
+            self.ros.park_dynamic_obstacle()
+            self.ros.publish_speed_scale(1.0)
         except Exception:
             pass
         self.executor.shutdown(timeout_sec=2.0)

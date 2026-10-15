@@ -94,6 +94,10 @@ def generate_launch_description():
                     real_time_factor,
                     value_type=float,
                 ),
+                "front_safety_stop_enabled": ParameterValue(
+                    LaunchConfiguration("front_safety_stop_enabled"),
+                    value_type=bool,
+                ),
                 "domain_randomization.enabled": ParameterValue(
                     domain_randomization,
                     value_type=bool,
@@ -139,6 +143,11 @@ def generate_launch_description():
             description=(
                 "Simulation speed relative to wall time; 0 means uncapped"
             ),
+        ),
+        DeclareLaunchArgument(
+            "front_safety_stop_enabled",
+            default_value="false",
+            description="Sim-only LiDAR stop at the wheel-command boundary",
         ),
         DeclareLaunchArgument(
             "domain_randomization",

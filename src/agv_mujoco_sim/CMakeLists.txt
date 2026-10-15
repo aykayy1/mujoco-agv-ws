@@ -30,6 +30,7 @@ install(
     meshes
     urdf
     launch
+    behavior_trees
     config
     maps
     transfer_models
@@ -54,8 +55,15 @@ install(
 install(
   PROGRAMS
     scripts/agv_rl_env.py
+    scripts/front_safety_stop.py
     scripts/benchmark_mppi_baseline.py
+    scripts/benchmark_dynamic_obstacle.py
+    scripts/run_dynamic_benchmark_matrix.py
+    scripts/run_mppi_three_maps.py
     scripts/train_sac.py
+    scripts/evaluate_sac_dynamic.py
+    scripts/resume_train.py
+    scripts/deploy_sac1.py
     scripts/check_runtime.py
     scripts/domain_randomizer.py
   DESTINATION lib/${PROJECT_NAME}
@@ -65,3 +73,18 @@ install(
   FILES requirements.txt
   DESTINATION share/${PROJECT_NAME}
 )
+
+# This package uses plain CMake, so colcon does not discover the Python tests
+# unless they are explicitly registered with CTest.
+include(CTest)
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(
+    NAME agv_mujoco_sim_pytest
+    COMMAND ${CMAKE_COMMAND} -E env
+      "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts:$ENV{PYTHONPATH}"
+      "PYTHONDONTWRITEBYTECODE=1"
+      ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+      ${CMAKE_CURRENT_SOURCE_DIR}/test
+  )
+endif()

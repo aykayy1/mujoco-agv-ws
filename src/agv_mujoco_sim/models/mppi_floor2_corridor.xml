@@ -1,0 +1,697 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="mppi_floor2_corridor">
+  <compiler angle="degree" meshdir="../meshes" autolimits="true" />
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" />
+  <visual>
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.8 0.8 0.8" specular="0.1 0.1 0.1" />
+  </visual>
+  <statistic center="0 0 0.2" extent="1.5" />
+  <default>
+    <joint damping="0.1" armature="0.001" />
+    <default class="visual">
+      <geom type="mesh" contype="0" conaffinity="0" density="0" group="2" />
+    </default>
+    <default class="collision">
+      <geom group="3" density="0" friction="1.0 0.005 0.0001" solref="0.005 1" solimp="0.9 0.95 0.001" />
+    </default>
+  </default>
+  <asset>
+    <mesh name="base_link_mesh" file="base_link.STL" />
+    <mesh name="left_wheel_mesh" file="left_wheel.STL" />
+    <mesh name="right_wheel_mesh" file="right_wheel.STL" />
+    <mesh name="front_left_caster_mesh" file="front_left_caster.STL" />
+    <mesh name="front_right_caster_mesh" file="front_right_caster.STL" />
+    <mesh name="rear_left_caster_mesh" file="rear_left_caster.STL" />
+    <mesh name="rear_right_caster_mesh" file="rear_right_caster.STL" />
+    <mesh name="imu_mesh" file="imu.STL" />
+    <mesh name="lidar_mesh" file="lidar.STL" />
+    <material name="mat_grey" rgba="0.6 0.6 0.6 1" />
+    <material name="mat_green" rgba="0.1 0.8 0.1 1" />
+    <material name="mat_red" rgba="0.8 0.1 0.1 1" />
+    <material name="mat_blue" rgba="0.1 0.1 0.8 1" />
+    <material name="mat_orange" rgba="0.9 0.5 0.1 1" />
+    <material name="mat_yellow" rgba="0.9 0.85 0.1 1" />
+  </asset>
+  <worldbody>
+    <light directional="true" pos="0 0 10" dir="0 0 -1" />
+    <body name="base_link" pos="0 0 0.15">
+      <freejoint name="base_freejoint" />
+      <inertial pos="-0.01641684226393 -2.127036027730e-08 0.01536357867772" mass="77.76660059782901" fullinertia="3.2338238997685766 4.5790630022931795 7.535284316709289 6.94917763249993e-07 -0.010447117841865663 -5.34948547228727e-08" />
+      <geom name="base_visual" class="visual" mesh="base_link_mesh" rgba="0.75 0.75 0.75 1" />
+      <geom name="base_collision_rear" class="collision" type="box" pos="-0.322 0 0.015" size="0.100 0.357 0.0725" rgba="0.2 0.5 0.8 0.15" />
+      <geom name="base_collision_center" class="collision" type="box" pos="-0.012 0 0.015" size="0.210 0.250 0.0725" rgba="0.2 0.5 0.8 0.15" />
+      <geom name="base_collision_front" class="collision" type="box" pos="0.298 0 0.015" size="0.100 0.357 0.0725" rgba="0.2 0.5 0.8 0.15" />
+      <site name="base_foot_link" type="sphere" pos="0 0 -0.1" size="0.005" rgba="0 1 0 0" />
+      <body name="left_wheel" pos="0 0.297 0" euler="-90 0 0">
+        <joint name="left_wheel_jt" type="hinge" axis="0 0 1" limited="false" damping="0.2" />
+        <inertial pos="-2.2767068983e-06 -4.0883539315e-07 -0.0141278415" mass="0.936684355982048" fullinertia="0.0029343491062 0.0029343328072 0.0056452287041 3.0243843436e-09 1.7611681221e-08 3.1625847890e-09" />
+        <geom name="left_wheel_visual" class="visual" mesh="left_wheel_mesh" rgba="0.15 0.15 0.15 1" />
+        <geom name="left_wheel_collision" class="collision" type="cylinder" size="0.1 0.028" friction="1.2 0.01 0.0001" rgba="1 0 0 0.2" />
+      </body>
+      <body name="right_wheel" pos="0 -0.297 0" euler="-90 0 0">
+        <joint name="right_wheel_jt" type="hinge" axis="0 0 1" limited="false" damping="0.2" />
+        <inertial pos="2.0712286184e-06 -1.0298315041e-06 0.0141278415" mass="0.936684355982047" fullinertia="0.0029343462033 0.0029343357101 0.0056452287041 -6.9306759880e-09 1.6022183872e-08 -7.9663594389e-09" />
+        <geom name="right_wheel_visual" class="visual" mesh="right_wheel_mesh" rgba="0.15 0.15 0.15 1" />
+        <geom name="right_wheel_collision" class="collision" type="cylinder" size="0.1 0.028" friction="1.2 0.01 0.0001" rgba="1 0 0 0.2" />
+      </body>
+      <body name="front_left_caster" pos="0.323 0.167 -0.078807">
+        <joint name="front_left_caster_jt" type="ball" damping="0.001" />
+        <inertial pos="0 0 -2.7371825402e-05" mass="0.0399091557703669" fullinertia="7.2111462855e-06 7.2111444698e-06 7.2594199749e-06 8.8035157662e-13 -8.7566291737e-14 2.1607959245e-13" />
+        <geom name="caster_front_left_visual" class="visual" mesh="front_left_caster_mesh" rgba="0.2 0.2 0.2 1" />
+        <geom name="caster_front_left_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25" />
+      </body>
+      <body name="front_right_caster" pos="0.323 -0.167 -0.078807">
+        <joint name="front_right_caster_jt" type="ball" damping="0.001" />
+        <inertial pos="0 0 -2.7371825402e-05" mass="0.0399091557703669" fullinertia="7.2111462855e-06 7.2111444698e-06 7.2594199749e-06 8.8035157716e-13 -8.7566300715e-14 2.1607958912e-13" />
+        <geom name="caster_front_right_visual" class="visual" mesh="front_right_caster_mesh" rgba="0.2 0.2 0.2 1" />
+        <geom name="caster_front_right_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25" />
+      </body>
+      <body name="rear_left_caster" pos="-0.347 0.167 -0.078807">
+        <joint name="rear_left_caster_jt" type="ball" damping="0.001" />
+        <inertial pos="0 0 -2.7371825402e-05" mass="0.0399091557703668" fullinertia="7.2111462855e-06 7.2111444698e-06 7.2594199749e-06 8.8035157366e-13 -8.7566301701e-14 2.1607958824e-13" />
+        <geom name="caster_rear_left_visual" class="visual" mesh="rear_left_caster_mesh" rgba="0.2 0.2 0.2 1" />
+        <geom name="caster_rear_left_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25" />
+      </body>
+      <body name="rear_right_caster" pos="-0.347 -0.167 -0.078807">
+        <joint name="rear_right_caster_jt" type="ball" damping="0.001" />
+        <inertial pos="0 0 -2.7371825402e-05" mass="0.0399091557703668" fullinertia="7.2111459706e-06 7.2111447847e-06 7.2594199749e-06 -1.1169235652e-12 -1.2014432927e-13 -1.9980887354e-13" />
+        <geom name="caster_rear_right_visual" class="visual" mesh="rear_right_caster_mesh" rgba="0.2 0.2 0.2 1" />
+        <geom name="caster_rear_right_collision" class="collision" type="sphere" size="0.0212" friction="0.35 0.002 0.0001" rgba="0.1 0.8 0.2 0.25" />
+      </body>
+      <body name="imu" pos="0 0 0.1091">
+        <inertial pos="0.0023989165 0 -0.0108251693" mass="0.0350113154456988" fullinertia="4.9486481208e-06 8.8682844667e-06 1.1262903048e-05 2.0030538049e-12 -1.7595997497e-08 6.5460652693e-23" />
+        <geom name="imu_visual" class="visual" mesh="imu_mesh" rgba="0.25 0.25 0.25 1" />
+        <site name="imu_site" type="sphere" pos="0 0 0" size="0.005" rgba="1 0.5 0 0" />
+      </body>
+      <body name="lidar" pos="0.33152 0 0.11235">
+        <inertial pos="0.0038697684 -1.4554375616e-05 -0.0055496380" mass="0.165382751635991" fullinertia="7.8865183611e-05 7.5190291494e-05 1.0994675306e-04 4.8471764092e-08 2.1847944396e-06 2.8860157251e-08" />
+        <geom name="lidar_visual" class="visual" mesh="lidar_mesh" rgba="0.3 0.3 0.3 1" />
+        <site name="lidar_origin" type="sphere" pos="0 0 0" size="0.005" rgba="1 0 0 0" />
+      </body>
+    </body>
+    <geom name="ground_plane" type="plane" size="100 100 0.1" rgba="0.82 0.83 0.85 1" friction="1.0 0.005 0.0001" />
+    <body name="dynamic_obstacle" mocap="true" pos="100 100 0.5">
+      <geom name="dynamic_obstacle_collision" type="cylinder" size="0.45 0.5" rgba="0.9 0.1 0.1 1" />
+    </body>
+    <geom name="map_wall_0" type="box" pos="3.7450 14.5450 0.75" size="2.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_1" type="box" pos="8.9450 14.5450 0.75" size="2.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_2" type="box" pos="13.6200 14.5450 0.75" size="1.7000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_3" type="box" pos="18.5700 14.5450 0.75" size="2.6500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_4" type="box" pos="24.0950 14.5450 0.75" size="2.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_5" type="box" pos="28.4200 14.5450 0.75" size="1.5500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_6" type="box" pos="32.8200 14.5450 0.75" size="2.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_7" type="box" pos="37.7700 14.5450 0.75" size="2.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_8" type="box" pos="42.8450 14.5450 0.75" size="1.9750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_9" type="box" pos="47.8700 14.5450 0.75" size="2.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_10" type="box" pos="52.9700 14.5450 0.75" size="2.0000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_11" type="box" pos="58.0700 14.5450 0.75" size="2.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_12" type="box" pos="61.9700 14.5450 0.75" size="1.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_13" type="box" pos="-1.7050 14.5200 0.75" size="3.0250 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_14" type="box" pos="3.7700 14.4950 0.75" size="2.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_15" type="box" pos="8.8700 14.4950 0.75" size="2.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_16" type="box" pos="13.6200 14.4950 0.75" size="1.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_17" type="box" pos="18.5450 14.4950 0.75" size="2.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_18" type="box" pos="24.0950 14.4950 0.75" size="1.7750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_19" type="box" pos="28.4200 14.4950 0.75" size="1.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_20" type="box" pos="32.8950 14.4950 0.75" size="1.8250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_21" type="box" pos="37.8450 14.4950 0.75" size="2.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_22" type="box" pos="42.8450 14.4950 0.75" size="1.8250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_23" type="box" pos="47.7700 14.4950 0.75" size="2.0000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_24" type="box" pos="52.9200 14.4950 0.75" size="1.7500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_25" type="box" pos="58.0200 14.4950 0.75" size="2.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_26" type="box" pos="3.7950 14.4450 0.75" size="1.8250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_27" type="box" pos="8.7950 14.4450 0.75" size="1.7750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_28" type="box" pos="13.6200 14.4450 0.75" size="1.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_29" type="box" pos="18.4950 14.4450 0.75" size="1.9750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_30" type="box" pos="24.0950 14.4450 0.75" size="1.4750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_31" type="box" pos="28.4450 14.4450 0.75" size="1.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_32" type="box" pos="32.9450 14.4450 0.75" size="1.5750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_33" type="box" pos="37.8950 14.4450 0.75" size="1.7250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_34" type="box" pos="42.8200 14.4450 0.75" size="1.5500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_35" type="box" pos="47.7200 14.4450 0.75" size="1.7500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_36" type="box" pos="52.8450 14.4450 0.75" size="1.5250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_37" type="box" pos="57.9450 14.4450 0.75" size="2.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_38" type="box" pos="60.1200 14.4450 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_39" type="box" pos="62.2450 14.4700 0.75" size="0.8750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_40" type="box" pos="-1.9800 14.4200 0.75" size="2.7500 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_41" type="box" pos="3.7950 14.3950 0.75" size="1.5750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_42" type="box" pos="5.6950 14.3950 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_43" type="box" pos="8.7200 14.3950 0.75" size="1.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_44" type="box" pos="13.5950 14.3950 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_45" type="box" pos="18.4450 14.3950 0.75" size="1.6250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_46" type="box" pos="22.6200 14.3950 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_47" type="box" pos="24.0700 14.3950 0.75" size="1.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_48" type="box" pos="28.4200 14.3950 0.75" size="1.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_49" type="box" pos="32.9700 14.3950 0.75" size="1.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_50" type="box" pos="37.9200 14.3950 0.75" size="1.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_51" type="box" pos="42.7950 14.3950 0.75" size="1.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_52" type="box" pos="47.6700 14.3950 0.75" size="1.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_53" type="box" pos="51.4450 14.3950 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_54" type="box" pos="52.7950 14.3950 0.75" size="1.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_55" type="box" pos="57.9200 14.3950 0.75" size="1.7500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_56" type="box" pos="59.9200 14.3950 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_57" type="box" pos="3.7950 14.3450 0.75" size="1.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_58" type="box" pos="5.4950 14.3450 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_59" type="box" pos="8.6700 14.3450 0.75" size="1.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_60" type="box" pos="10.5950 14.3450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_61" type="box" pos="13.5700 14.3450 0.75" size="0.9000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_62" type="box" pos="18.4200 14.3450 0.75" size="1.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_63" type="box" pos="22.8450 14.3450 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_64" type="box" pos="24.0700 14.3450 0.75" size="0.9000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_65" type="box" pos="25.6450 14.3450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_66" type="box" pos="28.4200 14.3450 0.75" size="0.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_67" type="box" pos="33.0200 14.3450 0.75" size="1.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_68" type="box" pos="37.9700 14.3450 0.75" size="1.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_69" type="box" pos="42.7450 14.3450 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_70" type="box" pos="47.6450 14.3450 0.75" size="1.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_71" type="box" pos="52.6950 14.3450 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_72" type="box" pos="57.8200 14.3450 0.75" size="1.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_73" type="box" pos="59.6200 14.3450 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_74" type="box" pos="62.2700 14.3700 0.75" size="0.8500 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_75" type="box" pos="3.8450 14.2950 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_76" type="box" pos="5.3200 14.2950 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_77" type="box" pos="8.5950 14.2950 0.75" size="0.9750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_78" type="box" pos="10.3450 14.2950 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_79" type="box" pos="11.6200 14.4200 0.75" size="0.2500 0.1500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_80" type="box" pos="13.5700 14.2950 0.75" size="0.7000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_81" type="box" pos="18.3950 14.2950 0.75" size="0.9250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_82" type="box" pos="20.3950 14.2950 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_83" type="box" pos="21.6700 14.4200 0.75" size="0.2500 0.1500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_84" type="box" pos="23.0950 14.2950 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_85" type="box" pos="24.0700 14.2950 0.75" size="0.6000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_86" type="box" pos="25.4700 14.2950 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_87" type="box" pos="26.4450 14.4200 0.75" size="0.1750 0.1500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_88" type="box" pos="28.4200 14.2950 0.75" size="0.7000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_89" type="box" pos="30.0950 14.2950 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_90" type="box" pos="31.3700 14.2950 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_91" type="box" pos="33.0700 14.2950 0.75" size="0.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_92" type="box" pos="35.1950 14.4200 0.75" size="0.1750 0.1500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_93" type="box" pos="36.1200 14.2950 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_94" type="box" pos="38.0200 14.2950 0.75" size="0.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_95" type="box" pos="42.7200 14.2950 0.75" size="0.8000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_96" type="box" pos="45.2450 14.4200 0.75" size="0.1750 0.1500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_97" type="box" pos="47.5950 14.2950 0.75" size="0.9750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_98" type="box" pos="49.3950 14.2950 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_99" type="box" pos="52.6200 14.2950 0.75" size="0.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_100" type="box" pos="54.3450 14.2950 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_101" type="box" pos="55.2450 14.4200 0.75" size="0.1750 0.1500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_102" type="box" pos="57.7450 14.2950 0.75" size="1.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_103" type="box" pos="59.3700 14.2950 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_104" type="box" pos="-2.0050 14.2950 0.75" size="2.7250 0.0750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_105" type="box" pos="1.8200 14.2450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_106" type="box" pos="2.2950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_107" type="box" pos="3.1200 14.2450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_108" type="box" pos="4.2950 14.2450 0.75" size="0.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_109" type="box" pos="4.7950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_110" type="box" pos="5.1700 14.2450 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_111" type="box" pos="6.6450 14.2450 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_112" type="box" pos="7.0950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_113" type="box" pos="8.2450 14.2450 0.75" size="0.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_114" type="box" pos="8.9700 14.2450 0.75" size="0.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_115" type="box" pos="9.5950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_116" type="box" pos="10.0950 14.2450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_117" type="box" pos="11.6950 14.2450 0.75" size="0.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_118" type="box" pos="12.2950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_119" type="box" pos="13.4450 14.2450 0.75" size="0.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_120" type="box" pos="13.9700 14.2450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_121" type="box" pos="14.7950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_122" type="box" pos="15.1700 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_123" type="box" pos="16.6200 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_124" type="box" pos="17.0950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_125" type="box" pos="17.8700 14.2450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_126" type="box" pos="18.8700 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_127" type="box" pos="19.5950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_128" type="box" pos="20.1200 14.2450 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_129" type="box" pos="21.7200 14.2450 0.75" size="0.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_130" type="box" pos="22.2950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_131" type="box" pos="23.1700 14.2450 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_132" type="box" pos="23.4200 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_133" type="box" pos="23.7950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_134" type="box" pos="24.1700 14.2450 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_135" type="box" pos="24.7950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_136" type="box" pos="25.2450 14.2450 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_137" type="box" pos="26.5200 14.2450 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_138" type="box" pos="27.0950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_139" type="box" pos="28.3950 14.2450 0.75" size="0.4750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_140" type="box" pos="29.5950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_141" type="box" pos="29.9950 14.2450 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_142" type="box" pos="31.5700 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_143" type="box" pos="31.9950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_144" type="box" pos="32.7200 14.2450 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_145" type="box" pos="33.6450 14.2450 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_146" type="box" pos="34.4950 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_147" type="box" pos="35.1200 14.2450 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_148" type="box" pos="36.3700 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_149" type="box" pos="36.8450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_150" type="box" pos="37.6450 14.2450 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_151" type="box" pos="38.5200 14.2450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_152" type="box" pos="39.3450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_153" type="box" pos="39.8200 14.2450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_154" type="box" pos="42.1950 14.2450 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_155" type="box" pos="43.0950 14.2450 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_156" type="box" pos="43.8450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_157" type="box" pos="44.3200 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_158" type="box" pos="45.3200 14.2450 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_159" type="box" pos="45.8450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_160" type="box" pos="47.2700 14.2450 0.75" size="0.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_161" type="box" pos="47.9950 14.2450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_162" type="box" pos="48.6450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_163" type="box" pos="49.1200 14.2450 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_164" type="box" pos="50.0450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_165" type="box" pos="50.5200 14.3950 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_166" type="box" pos="52.0450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_167" type="box" pos="52.9450 14.2450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_168" type="box" pos="53.6450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_169" type="box" pos="54.0950 14.2450 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_170" type="box" pos="55.2700 14.2450 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_171" type="box" pos="55.6450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_172" type="box" pos="56.8950 14.2450 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_173" type="box" pos="58.1200 14.2450 0.75" size="0.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_174" type="box" pos="58.6450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_175" type="box" pos="59.1200 14.2450 0.75" size="0.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_176" type="box" pos="60.1450 14.2450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_177" type="box" pos="60.5700 14.2450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_178" type="box" pos="62.2950 14.2700 0.75" size="0.8250 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_179" type="box" pos="-2.3050 14.1950 0.75" size="2.4250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_180" type="box" pos="0.4200 14.1950 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_181" type="box" pos="2.0450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_182" type="box" pos="3.5450 14.2200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_183" type="box" pos="4.2700 14.1950 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_184" type="box" pos="5.0450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_185" type="box" pos="6.8450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_186" type="box" pos="8.3450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_187" type="box" pos="9.8450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_188" type="box" pos="11.8450 14.1950 0.75" size="0.4750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_189" type="box" pos="13.5450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_190" type="box" pos="15.0450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_191" type="box" pos="16.8450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_192" type="box" pos="18.3450 14.2200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_193" type="box" pos="19.8450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_194" type="box" pos="21.8700 14.1950 0.75" size="0.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_195" type="box" pos="23.5450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_196" type="box" pos="25.0450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_197" type="box" pos="26.6950 14.1950 0.75" size="0.4250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_198" type="box" pos="28.3450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_199" type="box" pos="29.8450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_200" type="box" pos="31.7450 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_201" type="box" pos="33.2450 14.2200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_202" type="box" pos="34.9200 14.1950 0.75" size="0.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_203" type="box" pos="36.5950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_204" type="box" pos="38.0950 14.2200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_205" type="box" pos="39.5950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_206" type="box" pos="42.5950 14.2200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_207" type="box" pos="44.0950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_208" type="box" pos="45.4700 14.1950 0.75" size="0.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_209" type="box" pos="47.3950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_210" type="box" pos="48.8950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_211" type="box" pos="50.3950 14.1950 0.75" size="0.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_212" type="box" pos="52.3950 14.2200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_213" type="box" pos="53.8950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_214" type="box" pos="55.3700 14.1950 0.75" size="0.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_215" type="box" pos="57.3950 14.2200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_216" type="box" pos="57.9950 14.1950 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_217" type="box" pos="58.8950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_218" type="box" pos="60.3950 14.1950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_219" type="box" pos="61.7200 14.1950 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_220" type="box" pos="62.4950 14.1950 0.75" size="0.5250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_221" type="box" pos="0.4450 14.1450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_222" type="box" pos="61.6950 14.1450 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_223" type="box" pos="62.6450 14.1450 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_224" type="box" pos="0.4700 14.0950 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_225" type="box" pos="61.6700 14.0950 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_226" type="box" pos="0.5200 14.0450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_227" type="box" pos="61.6450 14.0450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_228" type="box" pos="-2.5800 14.0700 0.75" size="2.1500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_229" type="box" pos="0.5450 13.9950 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_230" type="box" pos="-0.5550 13.9450 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_231" type="box" pos="1.0700 14.1450 0.75" size="0.2500 0.3250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_232" type="box" pos="6.3450 14.1950 0.75" size="0.1750 0.3750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_233" type="box" pos="11.6200 13.9950 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_234" type="box" pos="15.5950 14.1950 0.75" size="0.1750 0.3750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_235" type="box" pos="21.6700 13.9950 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_236" type="box" pos="26.4450 13.9950 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_237" type="box" pos="30.4200 14.1950 0.75" size="0.2500 0.3750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_238" type="box" pos="35.1950 13.9950 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_239" type="box" pos="40.4700 14.1950 0.75" size="0.2500 0.3750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_240" type="box" pos="45.2450 13.9950 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_241" type="box" pos="50.5200 13.9950 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_242" type="box" pos="55.2450 13.9950 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_243" type="box" pos="61.0700 14.1700 0.75" size="0.2500 0.3500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_244" type="box" pos="1.0700 12.3950 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_245" type="box" pos="11.5950 12.3950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_246" type="box" pos="21.6450 12.3950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_247" type="box" pos="30.3950 12.3950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_248" type="box" pos="40.4450 12.3950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_249" type="box" pos="50.4950 12.3950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_250" type="box" pos="61.0450 12.3950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_251" type="box" pos="1.0200 12.3450 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_252" type="box" pos="1.2950 12.3450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_253" type="box" pos="60.9950 12.3450 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_254" type="box" pos="61.2950 12.3450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_255" type="box" pos="1.0700 12.2450 0.75" size="0.2500 0.0750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_256" type="box" pos="6.3450 12.2950 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_257" type="box" pos="11.6200 12.2700 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_258" type="box" pos="16.3950 12.2950 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_259" type="box" pos="21.6700 12.2700 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_260" type="box" pos="26.4450 12.2950 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_261" type="box" pos="30.4200 12.2700 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_262" type="box" pos="35.1950 12.2950 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_263" type="box" pos="40.4700 12.2700 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_264" type="box" pos="45.2450 12.2950 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_265" type="box" pos="50.5200 12.2700 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_266" type="box" pos="55.2450 12.2950 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_267" type="box" pos="61.0700 12.2450 0.75" size="0.2500 0.0750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_268" type="box" pos="31.0700 11.8950 0.75" size="30.2500 0.2750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_269" type="box" pos="-2.8800 10.7200 0.75" size="1.8500 3.2500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_270" type="box" pos="-4.6800 7.4450 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_271" type="box" pos="-4.6300 7.3950 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_272" type="box" pos="-4.6050 7.3450 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_273" type="box" pos="-4.5550 7.2950 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_274" type="box" pos="-4.5300 7.2450 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_275" type="box" pos="-4.5050 7.1700 0.75" size="0.2250 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_276" type="box" pos="-4.6800 6.8450 0.75" size="0.0500 0.2750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_277" type="box" pos="-4.6300 6.5450 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_278" type="box" pos="-4.5050 6.4950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_279" type="box" pos="-4.3800 6.4450 0.75" size="0.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_280" type="box" pos="-4.4050 6.3950 0.75" size="0.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_281" type="box" pos="-4.5050 6.3450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_282" type="box" pos="-4.5800 6.2950 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_283" type="box" pos="-4.6800 6.2450 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_284" type="box" pos="-3.8800 4.3450 0.75" size="0.8500 1.8750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_285" type="box" pos="31.0450 6.5450 0.75" size="30.1250 5.0750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_286" type="box" pos="30.9950 1.4450 0.75" size="30.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_287" type="box" pos="31.0450 1.1450 0.75" size="30.2750 0.2750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_288" type="box" pos="1.0450 0.8200 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_289" type="box" pos="0.7950 0.7450 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_290" type="box" pos="1.0950 0.7450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_291" type="box" pos="11.5950 0.7950 0.75" size="0.2750 0.0750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_292" type="box" pos="61.0700 0.7950 0.75" size="0.2500 0.0750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_293" type="box" pos="1.0450 0.6950 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_294" type="box" pos="11.5450 0.6950 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_295" type="box" pos="11.8450 0.6950 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_296" type="box" pos="40.7700 0.7700 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_297" type="box" pos="50.5200 0.7700 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_298" type="box" pos="61.0200 0.6950 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_299" type="box" pos="61.2950 0.6950 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_300" type="box" pos="1.0450 0.6450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_301" type="box" pos="6.3450 0.7450 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_302" type="box" pos="11.6200 0.6450 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_303" type="box" pos="16.3950 0.7450 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_304" type="box" pos="21.6700 0.7450 0.75" size="0.2500 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_305" type="box" pos="26.4450 0.7450 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_306" type="box" pos="30.4200 0.7450 0.75" size="0.2500 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_307" type="box" pos="35.1950 0.7450 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_308" type="box" pos="40.7450 0.6450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_309" type="box" pos="45.2450 0.7450 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_310" type="box" pos="50.4950 0.6450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_311" type="box" pos="55.2450 0.7450 0.75" size="0.1750 0.1250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_312" type="box" pos="61.0450 0.6450 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_313" type="box" pos="-2.9550 -0.7550 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_314" type="box" pos="1.0450 -0.7550 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_315" type="box" pos="-2.9800 -0.8050 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_316" type="box" pos="-3.0050 -0.8550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_317" type="box" pos="-3.0300 -0.9050 0.75" size="0.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_318" type="box" pos="-3.0800 -0.9550 0.75" size="0.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_319" type="box" pos="-3.1050 -1.0050 0.75" size="0.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_320" type="box" pos="-3.1300 -1.0550 0.75" size="0.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_321" type="box" pos="-0.4550 -1.0550 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_322" type="box" pos="61.6950 -1.0550 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_323" type="box" pos="-3.9550 -1.1050 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_324" type="box" pos="-3.1800 -1.1050 0.75" size="0.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_325" type="box" pos="-0.2800 -1.1050 0.75" size="0.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_326" type="box" pos="0.3450 -1.1050 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_327" type="box" pos="11.5950 -0.9550 0.75" size="0.2750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_328" type="box" pos="16.3950 -0.9550 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_329" type="box" pos="21.6700 -0.9550 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_330" type="box" pos="26.4450 -0.9550 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_331" type="box" pos="35.1950 -0.9550 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_332" type="box" pos="45.2450 -0.9550 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_333" type="box" pos="50.5200 -0.9550 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_334" type="box" pos="55.2450 -0.9550 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_335" type="box" pos="61.7200 -1.1050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_336" type="box" pos="62.6200 -1.1050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_337" type="box" pos="-3.4800 -1.1550 0.75" size="0.7500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_338" type="box" pos="-1.4550 -1.1300 0.75" size="0.3750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_339" type="box" pos="-0.3550 -1.1550 0.75" size="0.4750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_340" type="box" pos="0.3450 -1.1550 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_341" type="box" pos="2.0450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_342" type="box" pos="3.2700 -1.1550 0.75" size="0.5500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_343" type="box" pos="4.3700 -1.1550 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_344" type="box" pos="5.0450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_345" type="box" pos="6.8450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_346" type="box" pos="9.8450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_347" type="box" pos="11.8200 -1.1550 0.75" size="0.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_348" type="box" pos="15.0450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_349" type="box" pos="16.6700 -1.1550 0.75" size="0.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_350" type="box" pos="18.3450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_351" type="box" pos="19.8450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_352" type="box" pos="21.8700 -1.1550 0.75" size="0.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_353" type="box" pos="25.0450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_354" type="box" pos="26.6950 -1.1550 0.75" size="0.4250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_355" type="box" pos="29.8450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_356" type="box" pos="31.7450 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_357" type="box" pos="34.9200 -1.1550 0.75" size="0.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_358" type="box" pos="36.5950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_359" type="box" pos="39.5950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_360" type="box" pos="44.0950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_361" type="box" pos="45.4700 -1.1550 0.75" size="0.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_362" type="box" pos="48.8950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_363" type="box" pos="50.3950 -1.1550 0.75" size="0.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_364" type="box" pos="52.3950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_365" type="box" pos="53.8950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_366" type="box" pos="55.3700 -1.1550 0.75" size="0.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_367" type="box" pos="57.9450 -1.1550 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_368" type="box" pos="58.8950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_369" type="box" pos="60.3950 -1.1550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_370" type="box" pos="62.2950 -1.1550 0.75" size="0.7250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_371" type="box" pos="-3.5300 -1.2050 0.75" size="0.8000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_372" type="box" pos="-1.5050 -1.2050 0.75" size="0.4250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_373" type="box" pos="-0.2550 -1.2050 0.75" size="0.7750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_374" type="box" pos="1.0450 -1.0050 0.75" size="0.2750 0.2250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_375" type="box" pos="1.8950 -1.2050 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_376" type="box" pos="2.2950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_377" type="box" pos="3.1950 -1.2050 0.75" size="0.6250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_378" type="box" pos="4.3200 -1.2050 0.75" size="0.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_379" type="box" pos="4.7950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_380" type="box" pos="5.1450 -1.2050 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_381" type="box" pos="6.6700 -1.2050 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_382" type="box" pos="7.0950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_383" type="box" pos="7.9700 -1.2050 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_384" type="box" pos="8.3450 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_385" type="box" pos="8.9700 -1.2050 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_386" type="box" pos="9.5950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_387" type="box" pos="10.0450 -1.2050 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_388" type="box" pos="11.6700 -1.2050 0.75" size="0.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_389" type="box" pos="12.2950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_390" type="box" pos="13.1950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_391" type="box" pos="13.5450 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_392" type="box" pos="14.0950 -1.2050 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_393" type="box" pos="14.7950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_394" type="box" pos="15.2200 -1.2050 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_395" type="box" pos="16.6700 -1.2050 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_396" type="box" pos="17.0950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_397" type="box" pos="17.9950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_398" type="box" pos="18.2450 -1.2050 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_399" type="box" pos="18.5950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_400" type="box" pos="18.9950 -1.2050 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_401" type="box" pos="19.5950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_402" type="box" pos="19.9700 -1.2050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_403" type="box" pos="20.2200 -1.2050 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_404" type="box" pos="21.7200 -1.2050 0.75" size="0.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_405" type="box" pos="22.2950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_406" type="box" pos="23.1950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_407" type="box" pos="23.5450 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_408" type="box" pos="24.0950 -1.2050 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_409" type="box" pos="24.7950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_410" type="box" pos="25.2200 -1.2050 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_411" type="box" pos="26.5200 -1.2050 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_412" type="box" pos="27.0950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_413" type="box" pos="27.9450 -1.2050 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_414" type="box" pos="28.3450 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_415" type="box" pos="28.7200 -1.2050 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_416" type="box" pos="29.5950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_417" type="box" pos="29.9700 -1.2050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_418" type="box" pos="31.5950 -1.2050 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_419" type="box" pos="31.9950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_420" type="box" pos="32.7450 -1.2050 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_421" type="box" pos="33.2450 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_422" type="box" pos="33.5950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_423" type="box" pos="34.4950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_424" type="box" pos="34.9200 -1.2050 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_425" type="box" pos="36.3700 -1.2050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_426" type="box" pos="36.8450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_427" type="box" pos="37.6200 -1.2050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_428" type="box" pos="38.0950 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_429" type="box" pos="38.5200 -1.2050 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_430" type="box" pos="39.3450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_431" type="box" pos="39.7950 -1.2050 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_432" type="box" pos="42.1950 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_433" type="box" pos="42.5950 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_434" type="box" pos="43.0200 -1.2050 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_435" type="box" pos="43.8450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_436" type="box" pos="44.2700 -1.2050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_437" type="box" pos="45.2950 -1.2050 0.75" size="0.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_438" type="box" pos="45.8450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_439" type="box" pos="46.9950 -1.2050 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_440" type="box" pos="47.3950 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_441" type="box" pos="47.9450 -1.2050 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_442" type="box" pos="48.6450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_443" type="box" pos="49.0700 -1.2050 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_444" type="box" pos="49.2450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_445" type="box" pos="50.0450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_446" type="box" pos="52.3450 -1.2050 0.75" size="0.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_447" type="box" pos="52.9200 -1.2050 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_448" type="box" pos="53.6450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_449" type="box" pos="54.0950 -1.2050 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_450" type="box" pos="55.2700 -1.2050 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_451" type="box" pos="55.6450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_452" type="box" pos="56.9450 -1.2050 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_453" type="box" pos="57.3950 -1.1800 0.75" size="0.2750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_454" type="box" pos="58.0700 -1.2050 0.75" size="0.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_455" type="box" pos="58.6450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_456" type="box" pos="59.1200 -1.2050 0.75" size="0.2500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_457" type="box" pos="60.1450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_458" type="box" pos="60.6450 -1.2050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_459" type="box" pos="62.3200 -1.2050 0.75" size="0.8000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_460" type="box" pos="-3.5800 -1.2550 0.75" size="0.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_461" type="box" pos="-0.7550 -1.2550 0.75" size="1.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_462" type="box" pos="1.6950 -1.2550 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_463" type="box" pos="3.6950 -1.2550 0.75" size="1.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_464" type="box" pos="5.3200 -1.2550 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_465" type="box" pos="8.5950 -1.2550 0.75" size="0.9250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_466" type="box" pos="10.2700 -1.2550 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_467" type="box" pos="13.7700 -1.2550 0.75" size="0.8000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_468" type="box" pos="15.4450 -1.2550 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_469" type="box" pos="17.8950 -1.2550 0.75" size="0.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_470" type="box" pos="18.9450 -1.2550 0.75" size="0.6250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_471" type="box" pos="20.3200 -1.2550 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_472" type="box" pos="23.7700 -1.2550 0.75" size="0.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_473" type="box" pos="25.4450 -1.2550 0.75" size="0.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_474" type="box" pos="28.3450 -1.2550 0.75" size="0.6750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_475" type="box" pos="30.0950 -1.2550 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_476" type="box" pos="31.3700 -1.2550 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_477" type="box" pos="33.0950 -1.2550 0.75" size="0.7750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_478" type="box" pos="36.1450 -1.2550 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_479" type="box" pos="37.9950 -1.2550 0.75" size="0.8750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_480" type="box" pos="42.6950 -1.2550 0.75" size="0.7250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_481" type="box" pos="47.5450 -1.2550 0.75" size="0.8750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_482" type="box" pos="49.3950 -1.2550 0.75" size="0.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_483" type="box" pos="52.5950 -1.2550 0.75" size="0.8250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_484" type="box" pos="54.3200 -1.2550 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_485" type="box" pos="57.7200 -1.2550 0.75" size="1.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_486" type="box" pos="59.4200 -1.2550 0.75" size="0.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_487" type="box" pos="-4.6800 0.5700 0.75" size="0.0500 1.9000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_488" type="box" pos="-3.6300 -1.3050 0.75" size="0.9000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_489" type="box" pos="-0.7800 -1.3050 0.75" size="1.4000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_490" type="box" pos="3.7200 -1.3050 0.75" size="1.5500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_491" type="box" pos="5.5200 -1.3050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_492" type="box" pos="8.6450 -1.3050 0.75" size="1.2250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_493" type="box" pos="13.7950 -1.3050 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_494" type="box" pos="17.6200 -1.3050 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_495" type="box" pos="18.9700 -1.3050 0.75" size="0.9500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_496" type="box" pos="20.5700 -1.3050 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_497" type="box" pos="23.8450 -1.3050 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_498" type="box" pos="25.6450 -1.3050 0.75" size="0.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_499" type="box" pos="28.3450 -1.3050 0.75" size="0.8750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_500" type="box" pos="33.0450 -1.3050 0.75" size="1.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_501" type="box" pos="37.9700 -1.3050 0.75" size="1.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_502" type="box" pos="42.6950 -1.3050 0.75" size="0.9750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_503" type="box" pos="47.5950 -1.3050 0.75" size="1.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_504" type="box" pos="52.6450 -1.3050 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_505" type="box" pos="57.7450 -1.3050 0.75" size="1.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_506" type="box" pos="59.7200 -1.3050 0.75" size="0.1500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_507" type="box" pos="62.2950 -1.2800 0.75" size="0.8250 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_508" type="box" pos="-0.8300 -1.3550 0.75" size="1.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_509" type="box" pos="3.7450 -1.3550 0.75" size="1.7750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_510" type="box" pos="5.6700 -1.3550 0.75" size="0.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_511" type="box" pos="8.6950 -1.3550 0.75" size="1.4750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_512" type="box" pos="13.8700 -1.3550 0.75" size="1.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_513" type="box" pos="18.9700 -1.3550 0.75" size="1.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_514" type="box" pos="23.8700 -1.3550 0.75" size="1.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_515" type="box" pos="28.3950 -1.3550 0.75" size="1.0750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_516" type="box" pos="32.9950 -1.3550 0.75" size="1.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_517" type="box" pos="37.9200 -1.3550 0.75" size="1.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_518" type="box" pos="42.7450 -1.3550 0.75" size="1.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_519" type="box" pos="47.6700 -1.3550 0.75" size="1.4500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_520" type="box" pos="52.7200 -1.3550 0.75" size="1.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_521" type="box" pos="57.8450 -1.3550 0.75" size="1.6750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_522" type="box" pos="60.0200 -1.3550 0.75" size="0.0500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_523" type="box" pos="62.2700 -1.3550 0.75" size="0.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_524" type="box" pos="-0.8800 -1.4050 0.75" size="1.5500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_525" type="box" pos="1.0200 -1.3300 0.75" size="0.2500 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_526" type="box" pos="3.7700 -1.4050 0.75" size="2.0000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_527" type="box" pos="8.7200 -1.4050 0.75" size="1.7000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_528" type="box" pos="13.9200 -1.4050 0.75" size="1.5500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_529" type="box" pos="18.9700 -1.4050 0.75" size="1.6000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_530" type="box" pos="24.0200 -1.4050 0.75" size="1.5000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_531" type="box" pos="28.3950 -1.4050 0.75" size="1.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_532" type="box" pos="32.9450 -1.4050 0.75" size="1.5250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_533" type="box" pos="37.8950 -1.4050 0.75" size="1.7250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_534" type="box" pos="42.7950 -1.4050 0.75" size="1.5250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_535" type="box" pos="47.7200 -1.4050 0.75" size="1.7000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_536" type="box" pos="52.7450 -1.4050 0.75" size="1.5250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_537" type="box" pos="57.8950 -1.4050 0.75" size="1.9750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_538" type="box" pos="-0.9050 -1.4550 0.75" size="1.6250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_539" type="box" pos="1.0450 -1.4550 0.75" size="0.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_540" type="box" pos="3.7450 -1.4550 0.75" size="2.1750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_541" type="box" pos="8.7700 -1.4550 0.75" size="1.9000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_542" type="box" pos="13.9950 -1.4550 0.75" size="1.7750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_543" type="box" pos="18.9700 -1.4550 0.75" size="1.9500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_544" type="box" pos="24.0450 -1.4550 0.75" size="1.7250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_545" type="box" pos="28.3950 -1.4550 0.75" size="1.4250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_546" type="box" pos="32.8950 -1.4550 0.75" size="1.7750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_547" type="box" pos="37.8450 -1.4550 0.75" size="2.0250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_548" type="box" pos="42.8200 -1.4550 0.75" size="1.8000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_549" type="box" pos="47.7950 -1.4550 0.75" size="1.9250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_550" type="box" pos="52.8200 -1.4550 0.75" size="1.7000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_551" type="box" pos="57.9950 -1.4550 0.75" size="2.2750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_552" type="box" pos="61.0700 -1.1300 0.75" size="0.2500 0.3500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_553" type="box" pos="62.2450 -1.4300 0.75" size="0.8750 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_554" type="box" pos="-3.7300 -1.4300 0.75" size="1.0000 0.1000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_555" type="box" pos="-0.6550 -1.5050 0.75" size="1.9750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_556" type="box" pos="3.7200 -1.5050 0.75" size="2.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_557" type="box" pos="6.3450 -1.1550 0.75" size="0.1750 0.3750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_558" type="box" pos="8.8450 -1.5050 0.75" size="2.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_559" type="box" pos="14.0700 -1.5050 0.75" size="2.0000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_560" type="box" pos="16.3950 -1.3550 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_561" type="box" pos="19.0200 -1.5050 0.75" size="2.2000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_562" type="box" pos="24.0450 -1.5050 0.75" size="1.9250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_563" type="box" pos="28.3950 -1.5050 0.75" size="1.5750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_564" type="box" pos="32.8200 -1.5050 0.75" size="2.0000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_565" type="box" pos="35.1950 -1.3550 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_566" type="box" pos="37.8200 -1.5050 0.75" size="2.3000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_567" type="box" pos="40.4700 -1.1550 0.75" size="0.2500 0.3750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_568" type="box" pos="42.8200 -1.5050 0.75" size="2.0000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_569" type="box" pos="47.7950 -1.5050 0.75" size="2.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_570" type="box" pos="50.5200 -1.3550 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_571" type="box" pos="52.8200 -1.5050 0.75" size="1.9000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_572" type="box" pos="55.2450 -1.3800 0.75" size="0.1750 0.1500 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_573" type="box" pos="58.0700 -1.5050 0.75" size="2.5500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_574" type="box" pos="0.8950 -1.5550 0.75" size="5.6250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_575" type="box" pos="8.8950 -1.5550 0.75" size="2.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_576" type="box" pos="11.5950 -1.4050 0.75" size="0.2750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_577" type="box" pos="14.2450 -1.5550 0.75" size="2.3250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_578" type="box" pos="18.9950 -1.5550 0.75" size="2.3750 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_579" type="box" pos="21.6700 -1.4050 0.75" size="0.2500 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_580" type="box" pos="24.0700 -1.5550 0.75" size="2.1000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_581" type="box" pos="26.4450 -1.4050 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_582" type="box" pos="28.3950 -1.5550 0.75" size="1.7250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_583" type="box" pos="30.4200 -1.1800 0.75" size="0.2500 0.4000 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_584" type="box" pos="32.8450 -1.5550 0.75" size="2.1250 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_585" type="box" pos="40.0200 -1.5550 0.75" size="5.0000 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_586" type="box" pos="45.2450 -1.4050 0.75" size="0.1750 0.1750 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_587" type="box" pos="47.8200 -1.5550 0.75" size="2.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_588" type="box" pos="52.6200 -1.5550 0.75" size="2.3500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_589" type="box" pos="57.9200 -1.5550 0.75" size="2.8500 0.0250 0.75" rgba="0.33 0.35 0.38 1" />
+    <geom name="map_wall_590" type="box" pos="61.9700 -1.5300 0.75" size="1.1500 0.0500 0.75" rgba="0.33 0.35 0.38 1" />
+  </worldbody>
+  <sensor>
+    <gyro name="imu_gyro" site="imu_site" />
+    <accelerometer name="imu_accelerometer" site="imu_site" />
+    <framequat name="imu_orientation" objtype="site" objname="imu_site" />
+  </sensor>
+  <actuator>
+    <velocity name="left_wheel_motor" joint="left_wheel_jt" kv="100" ctrlrange="-8.3775804096 8.3775804096" forcerange="-19.1 19.1" />
+    <velocity name="right_wheel_motor" joint="right_wheel_jt" kv="100" ctrlrange="-8.3775804096 8.3775804096" forcerange="-19.1 19.1" />
+  </actuator>
+</mujoco>

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "arms": {
+    "mppi": {},
+    "speedlimit025": {"reactive-speed-limit-m-s": 0.25},
+    "fixed025": {"fixed-speed-limit-m-s": 0.25}
+  },
+  "scenarios": [
+    {"id": "clear", "args": {"trigger-x": 99.0, "timeout-s": 45.0}},
+    {"id": "cross_forward_020", "args": {"obstacle-speed-m-s": 0.20}},
+    {"id": "cross_forward_040", "args": {"obstacle-speed-m-s": 0.40}},
+    {"id": "cross_forward_060", "args": {"obstacle-speed-m-s": 0.60}},
+    {
+      "id": "cross_reverse_040",
+      "args": {
+        "obstacle-start-y": 1.5,
+        "obstacle-end-y": -1.5,
+        "obstacle-speed-m-s": 0.40
+      }
+    },
+    {
+      "id": "cross_early",
+      "args": {"trigger-x": 1.5, "obstacle-speed-m-s": 0.40}
+    },
+    {
+      "id": "cross_late",
+      "args": {"trigger-x": 3.5, "obstacle-speed-m-s": 0.40}
+    },
+    {
+      "id": "near_miss",
+      "args": {
+        "obstacle-start-y": -1.5,
+        "obstacle-end-y": -0.9,
+        "obstacle-speed-m-s": 0.40
+      }
+    },
+    {
+      "id": "stop_on_path",
+      "args": {
+        "obstacle-start-y": -1.5,
+        "obstacle-end-y": 0.0,
+        "obstacle-speed-m-s": 0.40,
+        "timeout-s": 55.0
+      }
+    }
+  ]
+}

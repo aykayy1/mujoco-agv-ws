@@ -105,16 +105,16 @@ class DomainRandomizer:
         profile = str(node.get_parameter("domain_randomization.profile").value)
         stage = str(node.get_parameter("domain_randomization.stage").value)
         presets = {
-            "light": (0.01, 0.01, 0.005, 0.01, 0.010),
-            "medium": (0.02, 0.02, 0.01, 0.02, 0.025),
-            "strong": (0.03, 0.03, 0.03, 0.05, 0.050),
+            "light": (0.01, 0.01, 0.005, 0.01, 0.010, 0.98),
+            "medium": (0.02, 0.02, 0.01, 0.02, 0.025, 0.90),
+            "strong": (0.03, 0.03, 0.03, 0.05, 0.050, 0.80),
         }
         if stage not in ("lidar", "lidar_odom", "all"):
             raise ValueError("stage must be lidar, lidar_odom or all")
         if profile != "custom":
             if profile not in presets:
                 raise ValueError("profile must be custom, light, medium or strong")
-            noise, bias, dropout, scale, latency = presets[profile]
+            noise, bias, dropout, scale, latency, response_low = presets[profile]
             ranges = {
                 "lidar_noise_std_m": (0.0, noise),
                 "lidar_bias_m": (-bias, bias),
@@ -125,6 +125,7 @@ class DomainRandomizer:
                               odom_angular_scale=(1-scale, 1+scale))
             if stage == "all":
                 ranges["command_latency_s"] = (0.0, latency)
+                ranges["velocity_response_scale"] = (response_low, 1.0)
             groups = {
                 name: ParameterGroup(name, name in ranges,
                     *ranges.get(name, (spec[0], spec[0])), spec[0],

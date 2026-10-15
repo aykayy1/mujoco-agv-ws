@@ -140,7 +140,7 @@ def main():
     checkpoint_callback = CheckpointCallback(
         save_freq=1000,
         save_path=str(run_dir),
-        name_prefix='sac_vmax_checkpoint',
+        name_prefix='sac_speed_scale_checkpoint',
         save_replay_buffer=True,
     )
     progress_callback = ProgressTrackerCallback(

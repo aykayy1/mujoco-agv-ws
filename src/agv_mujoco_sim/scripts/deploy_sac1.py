@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chạy thực (inference) model SAC để tinh chỉnh 4 tham số MPPI.
+"""Chạy inference model SAC 1D để điều khiển Nav2 SpeedLimit supervisor.
 
 Phiên bản này viết LẠI cho đúng API của agv_rl_env.AgvRlEnv hiện tại
 (bản cũ gọi Nav2Env với hàng chục method không tồn tại -> crash ngay
@@ -7,7 +7,7 @@ từ import).
 
 Ánh xạ API:
     _get_observation()          -> _observation()  (trả (obs, info))
-    _apply_action_to_mppi()     -> _apply_action()
+    publish [speed_scale]       -> _apply_action()
     _send_nav_goal(x, y)        -> ros.send_navigation_goal(x, y, yaw)
     _cancel_nav_goal_and_wait() -> ros.cancel_navigation()
     robot_x/robot_y/robot_yaw   -> ros.get_map_pose()
@@ -30,14 +30,15 @@ from action_msgs.msg import GoalStatus
 from stable_baselines3 import SAC
 
 from agv_rl_env import AgvRlEnv
+from train_sac import validate_model
 
 # ==========================================
 # CẤU HÌNH KỊCH BẢN
 # ==========================================
-MODEL_PATH = "/home/ubunturic/mujoco-agv-ws-main/src/agv_mujoco_sim/scripts/phase2_finetune_runs/run_20260827_110730/latest_model.zip"
-LOG_CSV_PATH = "vmax_deploy_log.csv"
-LOG_PLOT_PATH = "vmax_deploy_plot.png"
-ERROR_CSV_PATH = "vmax_deploy_position_error.csv"
+MODEL_PATH = os.environ.get("SAC_SPEED_SCALE_MODEL", "")
+LOG_CSV_PATH = "speed_scale_deploy_log.csv"
+LOG_PLOT_PATH = "speed_scale_deploy_plot.png"
+ERROR_CSV_PATH = "speed_scale_deploy_position_error.csv"
 
 # 4 vị trí cố định (frame 'map'), dạng (x, y, yaw_mục_tiêu_rad).
 # Phải giống hệt danh sách trong run_nav2_only.py để so sánh công bằng.
@@ -96,7 +97,7 @@ def _record_goal_error(error_rows, goal_idx, goal, env, ket_qua, goal_start_time
 
 
 def build_env():
-    """AgvRlEnv chỉ nhận 4 đối số; mọi bound action đã hardcode trong class."""
+    """Use the training observation path, including sensor-derived risk."""
     return AgvRlEnv(
         goals=FIXED_GOALS,
         goal_sampling="fixed",
@@ -107,11 +108,15 @@ def build_env():
 def run_scenario():
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(
-            f"Không tìm thấy model tại '{MODEL_PATH}'. Sửa MODEL_PATH."
+            "Đặt SAC_SPEED_SCALE_MODEL tới checkpoint 56D/1D tương thích. "
+            f"Giá trị hiện tại: '{MODEL_PATH}'."
         )
 
+    # Reject old 54D/checkpoint contracts before launching ROS or the robot.
+    model = SAC.load(MODEL_PATH)
+    validate_model(model)
     env = build_env()          # __init__ đã gọi ros.wait_until_ready()
-    model = SAC.load(MODEL_PATH, env=env)
+    model.set_env(env)
     print(f"[deploy] Đã load model, num_timesteps: {model.num_timesteps:,}")
 
     log_rows = []
@@ -151,8 +156,7 @@ def run_scenario():
                 obs, _ = env._observation()
                 action, _ = model.predict(obs, deterministic=True)
 
-                # _apply_action đã clip theo ACTION_LOW/HIGH rồi gửi SetParameters
-                v_final, w_path, w_goal, w_goal_angle = env._apply_action(action)
+                requested_scale = float(env._apply_action(action)[0])
 
                 # Chờ đúng chu kỳ như lúc train. KHÔNG spin_once ở đây.
                 deadline = time.monotonic() + env.STEP_WAIT_DURATION
@@ -160,6 +164,7 @@ def run_scenario():
                     time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
 
                 _, info = env._observation()
+                applied_scale = float(info["applied_speed_scale"])
                 dist_to_goal = float(info["distance_to_goal"])
                 d_obs = float(info["min_lidar"])
                 nav_status = info["nav_status"]
@@ -175,16 +180,16 @@ def run_scenario():
 
                 log_rows.append((
                     time.time() - t_start, goal_idx, step_count,
-                    float(v_final), float(w_path), float(w_goal),
-                    float(w_goal_angle), dist_to_goal, d_obs,
-                    v_actual, w_actual,
+                    requested_scale, applied_scale, dist_to_goal, d_obs,
+                    float(info["min_sector_ttc"]),
+                    float(info["hazard_persistence"]), v_actual, w_actual,
                 ))
 
                 print(
                     f"[deploy] goal#{goal_idx} step={step_count:4d} "
-                    f"vmax_dat={v_final:.2f} v_thuc={v_actual:.2f} w_thuc={w_actual:.2f} "
-                    f"w_path={w_path:.2f} w_goal={w_goal:.2f} "
-                    f"w_goal_angle={w_goal_angle:.2f}  dist={dist_to_goal:.2f}m "
+                    f"scale_yc={requested_scale:.2f} scale_ap={applied_scale:.2f} "
+                    f"v_thuc={v_actual:.2f} w_thuc={w_actual:.2f} "
+                    f"ttc_min={info['min_sector_ttc']:.2f}s dist={dist_to_goal:.2f}m "
                     f"d_obs={d_obs:.2f}m nav_status={nav_status}"
                 )
 
@@ -234,8 +239,9 @@ def save_log(log_rows):
         writer = csv.writer(f)
         writer.writerow([
             "t_wall_sec", "goal_idx", "step",
-            "vmax_dat", "w_path", "w_goal", "w_goal_angle",
-            "dist_to_goal_m", "d_obs_m",
+            "requested_speed_scale", "applied_speed_scale",
+            "dist_to_goal_m", "d_obs_m", "min_sector_ttc_s",
+            "hazard_persistence_s",
             "v_thuc_mps", "w_thuc_radps",
         ])
         writer.writerows(log_rows)
@@ -281,34 +287,33 @@ def plot_log(log_rows):
         return
 
     t = [r[0] for r in log_rows]
-    fig, axes = plt.subplots(5, 1, figsize=(10, 13), sharex=True)
+    fig, axes = plt.subplots(4, 1, figsize=(10, 11), sharex=True)
 
-    axes[0].plot(t, [r[3] for r in log_rows], label="vmax (đặt)", color="tab:blue", linestyle="--")
-    axes[0].plot(t, [r[9] for r in log_rows], label="v thực", color="tab:cyan")
-    axes[0].set_ylabel("Vận tốc dài (m/s)")
-    axes[0].set_title("4 tham số MPPI + vận tốc thực theo thời gian (SAC policy)")
+    axes[0].plot(t, [r[3] for r in log_rows], label="scale yêu cầu", linestyle="--")
+    axes[0].plot(t, [r[4] for r in log_rows], label="scale áp dụng")
+    axes[0].set_ylabel("Speed scale")
+    axes[0].set_title("SAC 1D SpeedLimit policy")
     axes[0].legend(loc="upper right", fontsize=8)
     axes[0].grid(True, alpha=0.3)
 
-    axes[1].plot(t, [r[10] for r in log_rows], color="tab:cyan")
-    axes[1].set_ylabel("Vận tốc góc thực (rad/s)")
+    axes[1].plot(t, [r[9] for r in log_rows], label="v thực")
+    axes[1].plot(t, [r[10] for r in log_rows], label="w thực")
+    axes[1].set_ylabel("Vận tốc")
+    axes[1].legend(loc="upper right", fontsize=8)
     axes[1].grid(True, alpha=0.3)
 
-    axes[2].plot(t, [r[4] for r in log_rows], label="w_path", color="tab:purple")
-    axes[2].plot(t, [r[5] for r in log_rows], label="w_goal", color="tab:orange")
-    axes[2].plot(t, [r[6] for r in log_rows], label="w_goal_angle", color="tab:brown")
-    axes[2].set_ylabel("Critic weight")
+    axes[2].plot(t, [r[5] for r in log_rows], label="distance goal")
+    axes[2].plot(t, [r[6] for r in log_rows], label="min lidar")
+    axes[2].set_ylabel("Khoảng cách (m)")
     axes[2].legend(loc="upper right", fontsize=8)
     axes[2].grid(True, alpha=0.3)
 
-    axes[3].plot(t, [r[7] for r in log_rows], color="tab:green")
-    axes[3].set_ylabel("Khoảng cách tới goal (m)")
+    axes[3].plot(t, [r[7] for r in log_rows], label="min TTC")
+    axes[3].plot(t, [r[8] for r in log_rows], label="hazard persistence")
+    axes[3].set_ylabel("Thời gian (s)")
+    axes[3].set_xlabel("Thời gian thực (giây)")
+    axes[3].legend(loc="upper right", fontsize=8)
     axes[3].grid(True, alpha=0.3)
-
-    axes[4].plot(t, [r[8] for r in log_rows], color="tab:red")
-    axes[4].set_ylabel("Vật cản gần nhất (m)")
-    axes[4].set_xlabel("Thời gian thực (giây)")
-    axes[4].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(LOG_PLOT_PATH, dpi=150)

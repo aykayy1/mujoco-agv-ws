@@ -325,6 +325,11 @@
     <!-- ========================================== -->
     <!-- ORIGINAL ROBOT STRUCTURE (unchanged)        -->
     <!-- ========================================== -->
+    <!-- Runtime obstacle used only by the dynamic MPPI benchmark. -->
+    <body name="dynamic_obstacle" mocap="true" pos="30 30 0.5">
+      <geom name="dynamic_obstacle_collision" type="cylinder" size="0.45 0.5" rgba="0.9 0.1 0.1 1"/>
+    </body>
+
     <body name="base_link" pos="0 0 0.15">
       <freejoint name="base_freejoint"/>
       <inertial pos="-0.01641684226393 -2.127036027730e-08 0.01536357867772" mass="77.76660059782901" fullinertia="3.2338238997685766 4.5790630022931795 7.535284316709289 6.94917763249993e-07 -0.010447117841865663 -5.34948547228727e-08"/>
